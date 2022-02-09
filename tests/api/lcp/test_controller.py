@@ -81,7 +81,7 @@ class TestLCPController(ControllerTest):
                 return_value=patron
             )
 
-            url = "http://circulationmanager.org/{0}/licenses{1}".format(
+            url = "http://circulationmanager.org/{}/licenses{}".format(
                 missing_collection_name, license_id
             )
 
@@ -118,7 +118,7 @@ class TestLCPController(ControllerTest):
                 return_value=patron
             )
 
-            url = "http://circulationmanager.org/{0}/licenses{1}".format(
+            url = "http://circulationmanager.org/{}/licenses{}".format(
                 LCPAPI.NAME, license_id
             )
 

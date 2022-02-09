@@ -50,7 +50,7 @@ def empty_config(replacement_classes=None):
         yield i
 
 
-class ConfigurationConstants(object):
+class ConfigurationConstants:
 
     # Each facet group has two associated per-library keys: one
     # configuring which facets are enabled for that facet group, and
@@ -669,7 +669,7 @@ class Configuration(ConfigurationConstants):
                 configuration = cls._load(open(config_path).read())
             except Exception as e:
                 raise CannotLoadConfiguration(
-                    "Error loading configuration file %s: %s" % (config_path, e)
+                    f"Error loading configuration file {config_path}: {e}"
                 )
         else:
             configuration = cls._load("{}")

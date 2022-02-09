@@ -1,4 +1,3 @@
-# encoding: utf-8
 # Identifier, Equivalency
 import logging
 import random
@@ -84,7 +83,7 @@ class Identifier(Base, IdentifierConstants):
             title = ' prim_ed=%d ("%s")' % (records[0].id, records[0].title)
         else:
             title = ""
-        return "%s/%s ID=%s%s" % (self.type, self.identifier, self.id, title)
+        return f"{self.type}/{self.identifier} ID={self.id}{title}"
 
     # One Identifier may serve as the primary identifier for
     # several Editions.
@@ -171,9 +170,7 @@ class Identifier(Base, IdentifierConstants):
             foreign_identifier = foreign_identifier.lower()
 
         if not cls.valid_as_foreign_identifier(foreign_type, foreign_identifier):
-            raise ValueError(
-                '"%s" is not a valid %s.' % (foreign_identifier, foreign_type)
-            )
+            raise ValueError(f'"{foreign_identifier}" is not a valid {foreign_type}.')
 
         return (foreign_type, foreign_identifier)
 
@@ -213,7 +210,7 @@ class Identifier(Base, IdentifierConstants):
             return self.GUTENBERG_URN_SCHEME_PREFIX + identifier_text
         else:
             identifier_type = quote(self.type)
-            return self.URN_SCHEME_PREFIX + "%s/%s" % (identifier_type, identifier_text)
+            return self.URN_SCHEME_PREFIX + f"{identifier_type}/{identifier_text}"
 
     @property
     def work(self):
@@ -342,7 +339,7 @@ class Identifier(Base, IdentifierConstants):
         # Find any identifier details that don't correspond to an existing
         # identifier. Try to create them.
         new_identifiers = list()
-        new_identifiers_details = set([])
+        new_identifiers_details = set()
         for urn, details in list(identifier_details.items()):
             if details in new_identifiers_details:
                 # For some reason, this identifier is here twice.

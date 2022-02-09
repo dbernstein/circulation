@@ -1,4 +1,3 @@
-# encoding: utf-8
 import json
 import os
 import random
@@ -60,7 +59,7 @@ from . import sample_data
 
 class BibliothecaAPITest(DatabaseTest):
     def setup_method(self):
-        super(BibliothecaAPITest, self).setup_method()
+        super().setup_method()
         self.collection = MockBibliothecaAPI.mock_collection(self._db)
         self.api = MockBibliothecaAPI(self._db, self.collection)
 
@@ -74,7 +73,7 @@ class BibliothecaAPITest(DatabaseTest):
 
 class TestBibliothecaAPI(BibliothecaAPITest):
     def setup_method(self):
-        super(TestBibliothecaAPI, self).setup_method()
+        super().setup_method()
         self.collection = MockBibliothecaAPI.mock_collection(self._db)
         self.api = MockBibliothecaAPI(self._db, self.collection)
 
@@ -214,7 +213,7 @@ class TestBibliothecaAPI(BibliothecaAPITest):
         assert b"some data" == response
 
     def test_bibliographic_lookup(self):
-        class MockItemListParser(object):
+        class MockItemListParser:
             def parse(self, data):
                 self.parse_called_with = data
                 yield "item1"
@@ -876,7 +875,7 @@ class TestErrorParser(BibliothecaAPITest):
         assert "Unknown error" == error.message
 
 
-class TestBibliothecaEventParser(object):
+class TestBibliothecaEventParser:
 
     # Sample event feed to test out the parser.
     TWO_EVENTS = """<LibraryEventBatch xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
@@ -935,7 +934,7 @@ class TestBibliothecaEventParser(object):
         assert correct_end == end_time
 
 
-class TestErrorParser(object):
+class TestErrorParser:
 
     # Some sample error documents.
 
@@ -1657,13 +1656,13 @@ class TestItemListParser(BibliothecaAPITest):
         # So, we'll test zero and one escapings here.
         authors = list(
             ItemListParser.contributors_from_string(
-                u"Raji Codell, Esmé; Raji Codell, Esm&#233;"
+                "Raji Codell, Esmé; Raji Codell, Esm&#233;"
             )
         )
         author_names = [a.sort_name for a in authors]
         assert len(authors) == 2
         assert len(set(author_names)) == 1
-        assert all(u"Raji Codell, Esmé" == name for name in author_names)
+        assert all("Raji Codell, Esmé" == name for name in author_names)
 
         # It's possible to specify some role other than AUTHOR_ROLE.
         narrators = list(

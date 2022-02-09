@@ -1,4 +1,3 @@
-# encoding: utf-8
 import json
 import random
 from datetime import timedelta
@@ -41,7 +40,7 @@ from . import sample_data
 
 class OverdriveAPITest(DatabaseTest):
     def setup_method(self):
-        super(OverdriveAPITest, self).setup_method()
+        super().setup_method()
         library = self._default_library
         self.collection = MockOverdriveAPI.mock_collection(self._db)
         self.circulation = CirculationAPI(
@@ -257,7 +256,7 @@ class TestOverdriveAPI(OverdriveAPITest):
         # scope_string() puts the website ID of the Overdrive
         # integration and the ILS name associated with the library
         # into the form expected by Overdrive.
-        expect = "websiteid:%s authorizationname:%s" % (
+        expect = "websiteid:{} authorizationname:{}".format(
             self.api.website_id.decode("utf-8"),
             self.api.ils_name(self._default_library),
         )
@@ -277,7 +276,7 @@ class TestOverdriveAPI(OverdriveAPITest):
             )
 
             def __init__(self, *args, **kwargs):
-                super(Mock, self).__init__(*args, **kwargs)
+                super().__init__(*args, **kwargs)
                 self.extract_expiration_date_called_with = []
                 self._process_checkout_error_called_with = []
 
@@ -367,7 +366,7 @@ class TestOverdriveAPI(OverdriveAPITest):
             MOCK_EXPIRATION_DATE = object()
 
             def __init__(self, *args, **kwargs):
-                super(Mock, self).__init__(*args, **kwargs)
+                super().__init__(*args, **kwargs)
                 self.update_licensepool_called_with = []
                 self.get_loan_called_with = []
                 self.extract_expiration_date_called_with = []
@@ -477,7 +476,7 @@ class TestOverdriveAPI(OverdriveAPITest):
         # whether default_notification_email_address returns something.
         class Mock(MockOverdriveAPI):
             def __init__(self, *args, **kwargs):
-                super(Mock, self).__init__(*args, **kwargs)
+                super().__init__(*args, **kwargs)
                 self.DEFAULT_NOTIFICATION_EMAIL_ADDRESS = None
 
             def default_notification_email_address(self, patron, pin):
@@ -990,26 +989,18 @@ class TestOverdriveAPI(OverdriveAPITest):
 
         # The delivery mechanisms have been updated.
         assert 4 == len(pool.delivery_mechanisms)
-        assert set(
-            [
-                MediaTypes.EPUB_MEDIA_TYPE,
-                DeliveryMechanism.KINDLE_CONTENT_TYPE,
-                DeliveryMechanism.STREAMING_TEXT_CONTENT_TYPE,
-                MediaTypes.OVERDRIVE_EBOOK_MANIFEST_MEDIA_TYPE,
-            ]
-        ) == set(
-            [lpdm.delivery_mechanism.content_type for lpdm in pool.delivery_mechanisms]
-        )
-        assert set(
-            [
-                DeliveryMechanism.ADOBE_DRM,
-                DeliveryMechanism.KINDLE_DRM,
-                DeliveryMechanism.LIBBY_DRM,
-                DeliveryMechanism.STREAMING_DRM,
-            ]
-        ) == set(
-            [lpdm.delivery_mechanism.drm_scheme for lpdm in pool.delivery_mechanisms]
-        )
+        assert {
+            MediaTypes.EPUB_MEDIA_TYPE,
+            DeliveryMechanism.KINDLE_CONTENT_TYPE,
+            DeliveryMechanism.STREAMING_TEXT_CONTENT_TYPE,
+            MediaTypes.OVERDRIVE_EBOOK_MANIFEST_MEDIA_TYPE,
+        } == {lpdm.delivery_mechanism.content_type for lpdm in pool.delivery_mechanisms}
+        assert {
+            DeliveryMechanism.ADOBE_DRM,
+            DeliveryMechanism.KINDLE_DRM,
+            DeliveryMechanism.LIBBY_DRM,
+            DeliveryMechanism.STREAMING_DRM,
+        } == {lpdm.delivery_mechanism.drm_scheme for lpdm in pool.delivery_mechanisms}
 
     def test_get_fulfillment_link_from_download_link(self):
         patron = self._patron()
@@ -1126,26 +1117,18 @@ class TestOverdriveAPI(OverdriveAPITest):
 
         # The delivery mechanisms have been updated.
         assert 4 == len(pool.delivery_mechanisms)
-        assert set(
-            [
-                MediaTypes.EPUB_MEDIA_TYPE,
-                DeliveryMechanism.KINDLE_CONTENT_TYPE,
-                DeliveryMechanism.STREAMING_TEXT_CONTENT_TYPE,
-                MediaTypes.OVERDRIVE_EBOOK_MANIFEST_MEDIA_TYPE,
-            ]
-        ) == set(
-            [lpdm.delivery_mechanism.content_type for lpdm in pool.delivery_mechanisms]
-        )
-        assert set(
-            [
-                DeliveryMechanism.ADOBE_DRM,
-                DeliveryMechanism.KINDLE_DRM,
-                DeliveryMechanism.LIBBY_DRM,
-                DeliveryMechanism.STREAMING_DRM,
-            ]
-        ) == set(
-            [lpdm.delivery_mechanism.drm_scheme for lpdm in pool.delivery_mechanisms]
-        )
+        assert {
+            MediaTypes.EPUB_MEDIA_TYPE,
+            DeliveryMechanism.KINDLE_CONTENT_TYPE,
+            DeliveryMechanism.STREAMING_TEXT_CONTENT_TYPE,
+            MediaTypes.OVERDRIVE_EBOOK_MANIFEST_MEDIA_TYPE,
+        } == {lpdm.delivery_mechanism.content_type for lpdm in pool.delivery_mechanisms}
+        assert {
+            DeliveryMechanism.ADOBE_DRM,
+            DeliveryMechanism.KINDLE_DRM,
+            DeliveryMechanism.LIBBY_DRM,
+            DeliveryMechanism.STREAMING_DRM,
+        } == {lpdm.delivery_mechanism.drm_scheme for lpdm in pool.delivery_mechanisms}
 
         # The Edition's medium has been corrected.
         assert Edition.BOOK_MEDIUM == edition.medium
@@ -1473,7 +1456,7 @@ class TestOverdriveAPI(OverdriveAPITest):
         url, payload, headers, kwargs = with_pin
         assert "https://oauth-patron.overdrive.com/patrontoken" == url
         assert "barcode" == payload["username"]
-        expect_scope = "websiteid:%s authorizationname:%s" % (
+        expect_scope = "websiteid:{} authorizationname:{}".format(
             self.api.website_id.decode("utf-8"),
             self.api.ils_name(patron.library),
         )
@@ -1498,7 +1481,7 @@ class TestOverdriveAPICredentials(OverdriveAPITest):
             return obj.get(key, "none")
 
         def _make_token(scope, username, password, grant_type="password"):
-            return "%s|%s|%s|%s" % (grant_type, scope, username, password)
+            return f"{grant_type}|{scope}|{username}|{password}"
 
         class MockAPI(MockOverdriveAPI):
             def token_post(self, url, payload, headers={}, **kwargs):
@@ -2043,7 +2026,7 @@ class TestOverdriveCirculationMonitor(OverdriveAPITest):
         #
         # The method stops when should_stop() -- called on every book
         # -- returns True.
-        class MockAPI(object):
+        class MockAPI:
             def __init__(self, *ignore, **kwignore):
                 self.licensepools = []
                 self.update_licensepool_calls = []
@@ -2053,7 +2036,7 @@ class TestOverdriveCirculationMonitor(OverdriveAPITest):
                 self.update_licensepool_calls.append((book_id, pool))
                 return pool, is_new, is_changed
 
-        class MockAnalytics(object):
+        class MockAnalytics:
             def __init__(self, _db):
                 self._db = _db
                 self.events = []
@@ -2156,7 +2139,7 @@ class TestOverdriveCirculationMonitor(OverdriveAPITest):
 
 class TestNewTitlesOverdriveCollectionMonitor(OverdriveAPITest):
     def test_recently_changed_ids(self):
-        class MockAPI(object):
+        class MockAPI:
             def __init__(self, *args, **kwargs):
                 pass
 

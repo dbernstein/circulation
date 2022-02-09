@@ -1,4 +1,3 @@
-# encoding: utf-8
 # Complaint
 
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
@@ -13,25 +12,23 @@ class Complaint(Base):
 
     __tablename__ = "complaints"
 
-    VALID_TYPES = set(
-        [
-            "http://librarysimplified.org/terms/problem/" + x
-            for x in [
-                "wrong-genre",
-                "wrong-audience",
-                "wrong-age-range",
-                "wrong-title",
-                "wrong-medium",
-                "wrong-author",
-                "bad-cover-image",
-                "bad-description",
-                "cannot-fulfill-loan",
-                "cannot-issue-loan",
-                "cannot-render",
-                "cannot-return",
-            ]
+    VALID_TYPES = {
+        "http://librarysimplified.org/terms/problem/" + x
+        for x in [
+            "wrong-genre",
+            "wrong-audience",
+            "wrong-age-range",
+            "wrong-title",
+            "wrong-medium",
+            "wrong-author",
+            "bad-cover-image",
+            "bad-description",
+            "cannot-fulfill-loan",
+            "cannot-issue-loan",
+            "cannot-render",
+            "cannot-return",
         ]
-    )
+    }
 
     LICENSE_POOL_TYPES = [
         "cannot-fulfill-loan",

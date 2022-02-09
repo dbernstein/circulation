@@ -7,7 +7,7 @@ import binascii
 import os
 
 
-class UnicodeAwareBase64(object):
+class UnicodeAwareBase64:
     """Simulate the interface of the base64 module, but make it look as
     though base64-encoding and -decoding works on Unicode strings.
 

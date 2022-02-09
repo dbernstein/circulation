@@ -24,7 +24,7 @@ from .util import LanguageCodes
 from .util.datetime_helpers import utc_now
 
 
-class Annotator(object):
+class Annotator:
     """The Annotator knows how to add information about a Work to
     a MARC record."""
 
@@ -508,7 +508,7 @@ class MARCExporterFacets(BaseFacets):
         filter.updated_after = self.start_time
 
 
-class MARCExporter(object):
+class MARCExporter:
     """Turn a work into a record for a MARC file."""
 
     NAME = ExternalIntegration.MARC_EXPORT

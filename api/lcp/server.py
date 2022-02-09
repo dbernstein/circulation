@@ -118,7 +118,7 @@ class LCPServerConfiguration(ConfigurationGrouping):
     )
 
 
-class LCPServer(object):
+class LCPServer:
     """Wrapper around LCP License Server's API"""
 
     def __init__(
@@ -298,7 +298,7 @@ class LCPServer(object):
                 protected_content_length=encrypted_content.protected_content_length,
                 protected_content_sha256=encrypted_content.protected_content_sha256,
             )
-            path = "/contents/{0}".format(encrypted_content.content_id)
+            path = f"/contents/{encrypted_content.content_id}"
 
             self._send_request(
                 configuration, "put", path, payload, LCPEncryptorResultJSONEncoder
@@ -334,7 +334,7 @@ class LCPServer(object):
             partial_license_payload = self._create_partial_license(
                 db, configuration, patron, license_start, license_end
             )
-            path = "contents/{0}/license".format(content_id)
+            path = f"contents/{content_id}/license"
             response = self._send_request(
                 configuration, "post", path, partial_license_payload
             )
@@ -362,7 +362,7 @@ class LCPServer(object):
             partial_license_payload = self._create_partial_license(
                 db, configuration, patron
             )
-            path = "licenses/{0}".format(license_id)
+            path = f"licenses/{license_id}"
 
             response = self._send_request(
                 configuration, "post", path, partial_license_payload

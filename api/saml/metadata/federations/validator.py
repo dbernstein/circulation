@@ -14,8 +14,7 @@ class SAMLFederatedMetadataValidationError(BaseError):
     """Raised in the case of any errors happened during SAML metadata validation."""
 
 
-@six.add_metaclass(ABCMeta)
-class SAMLFederatedMetadataValidator(object):
+class SAMLFederatedMetadataValidator(metaclass=ABCMeta):
     """Base class for all validators checking correctness of SAML federated metadata."""
 
     def validate(self, federation, metadata):
@@ -45,7 +44,7 @@ class SAMLFederatedMetadataValidatorChain(SAMLFederatedMetadataValidator):
         for validator in validators:
             if not isinstance(validator, SAMLFederatedMetadataValidator):
                 raise ValueError(
-                    "Argument 'validators' must contain only instances of {0} class".format(
+                    "Argument 'validators' must contain only instances of {} class".format(
                         SAMLFederatedMetadataValidator
                     )
                 )
@@ -104,7 +103,7 @@ class SAMLFederatedMetadataExpirationValidator(SAMLFederatedMetadataValidator):
         :raises SAMLFederatedMetadataValidationError: in the case of validation errors
         """
         self._logger.info(
-            "Started validating the expiration time of the metadata belonging to {0}".format(
+            "Started validating the expiration time of the metadata belonging to {}".format(
                 federation
             )
         )
@@ -133,7 +132,7 @@ class SAMLFederatedMetadataExpirationValidator(SAMLFederatedMetadataValidator):
         if valid_until < now and (now - valid_until) > self.MAX_CLOCK_SKEW:
             raise SAMLFederatedMetadataValidationError(
                 "Metadata has already expired. "
-                '"validUntil" is {0} while the current time is {1}'.format(
+                '"validUntil" is {} while the current time is {}'.format(
                     valid_until, now
                 )
             )
@@ -141,13 +140,13 @@ class SAMLFederatedMetadataExpirationValidator(SAMLFederatedMetadataValidator):
         if valid_until > now and (valid_until - now) > self.MAX_VALID_TIME:
             raise SAMLFederatedMetadataValidationError(
                 "Expiration time is unexpectedly far into the future. "
-                '"validUntil" is {0} while the current time is {1}'.format(
+                '"validUntil" is {} while the current time is {}'.format(
                     valid_until, now
                 )
             )
 
         self._logger.info(
-            "Finished validating the expiration time of the metadata belonging to {0}".format(
+            "Finished validating the expiration time of the metadata belonging to {}".format(
                 federation
             )
         )
@@ -172,7 +171,7 @@ class SAMLMetadataSignatureValidator(SAMLFederatedMetadataValidator):
         :raises SAMLFederatedMetadataValidationError: in the case of validation errors
         """
         self._logger.info(
-            "Started verifying the validity of the metadata's signature belonging to {0}".format(
+            "Started verifying the validity of the metadata's signature belonging to {}".format(
                 federation
             )
         )
@@ -187,7 +186,7 @@ class SAMLMetadataSignatureValidator(SAMLFederatedMetadataValidator):
             )
 
         self._logger.info(
-            "Finished verifying the validity of the metadata's signature belonging to {0}".format(
+            "Finished verifying the validity of the metadata's signature belonging to {}".format(
                 federation
             )
         )

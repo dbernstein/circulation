@@ -148,7 +148,7 @@ def lane_from_genres(
     exclude_genres=None,
     priority=0,
     audiences=None,
-    **extra_args
+    **extra_args,
 ):
     """Turn genre info into a Lane object."""
 
@@ -175,7 +175,7 @@ def lane_from_genres(
                         library,
                         [subgenre],
                         priority=sublane_priority,
-                        **extra_args
+                        **extra_args,
                     )
                 )
                 sublane_priority += 1
@@ -229,7 +229,7 @@ def lane_from_genres(
         audiences=audiences,
         sublanes=sublanes,
         priority=priority,
-        **extra_args
+        **extra_args,
     )
     lane.visible = visible
     for genre in genres:
@@ -295,7 +295,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
             library=library,
             display_name="Best Sellers",
             priority=priority,
-            **common_args
+            **common_args,
         )
         priority += 1
         best_sellers.list_datasource = nyt_data_source
@@ -311,7 +311,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
             display_name="Best Sellers",
             fiction=True,
             priority=adult_fiction_priority,
-            **adult_common_args
+            **adult_common_args,
         )
         adult_fiction_priority += 1
         adult_fiction_best_sellers.list_datasource = nyt_data_source
@@ -337,7 +337,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
         sublanes=adult_fiction_sublanes,
         fiction=True,
         priority=priority,
-        **adult_common_args
+        **adult_common_args,
     )
     priority += 1
     sublanes.append(adult_fiction)
@@ -352,7 +352,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
             display_name="Best Sellers",
             fiction=False,
             priority=adult_nonfiction_priority,
-            **adult_common_args
+            **adult_common_args,
         )
         adult_nonfiction_priority += 1
         adult_nonfiction_best_sellers.list_datasource = nyt_data_source
@@ -371,7 +371,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
                 library,
                 [genre],
                 priority=adult_nonfiction_priority,
-                **adult_common_args
+                **adult_common_args,
             )
             adult_nonfiction_priority += 1
             adult_nonfiction_sublanes.append(genre_lane)
@@ -385,7 +385,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
         sublanes=adult_nonfiction_sublanes,
         fiction=False,
         priority=priority,
-        **adult_common_args
+        **adult_common_args,
     )
     priority += 1
     sublanes.append(adult_nonfiction)
@@ -402,7 +402,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
         fiction=True,
         sublanes=[],
         priority=priority,
-        **ya_common_args
+        **ya_common_args,
     )
     priority += 1
     sublanes.append(ya_fiction)
@@ -416,7 +416,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
             display_name="Best Sellers",
             fiction=True,
             priority=ya_fiction_priority,
-            **ya_common_args
+            **ya_common_args,
         )
         ya_fiction_priority += 1
         ya_fiction_best_sellers.list_datasource = nyt_data_source
@@ -428,7 +428,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
             library,
             [genres.Dystopian_SF],
             priority=ya_fiction_priority,
-            **ya_common_args
+            **ya_common_args,
         )
     )
     ya_fiction_priority += 1
@@ -438,7 +438,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
             library,
             [genres.Fantasy],
             priority=ya_fiction_priority,
-            **ya_common_args
+            **ya_common_args,
         )
     )
     ya_fiction_priority += 1
@@ -448,7 +448,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
             library,
             [genres.Comics_Graphic_Novels],
             priority=ya_fiction_priority,
-            **ya_common_args
+            **ya_common_args,
         )
     )
     ya_fiction_priority += 1
@@ -459,7 +459,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
             [genres.Literary_Fiction],
             display_name="Contemporary Fiction",
             priority=ya_fiction_priority,
-            **ya_common_args
+            **ya_common_args,
         )
     )
     ya_fiction_priority += 1
@@ -469,7 +469,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
             library,
             [genres.LGBTQ_Fiction],
             priority=ya_fiction_priority,
-            **ya_common_args
+            **ya_common_args,
         )
     )
     ya_fiction_priority += 1
@@ -480,7 +480,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
             [genres.Suspense_Thriller, genres.Mystery],
             display_name="Mystery & Thriller",
             priority=ya_fiction_priority,
-            **ya_common_args
+            **ya_common_args,
         )
     )
     ya_fiction_priority += 1
@@ -490,7 +490,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
             library,
             [genres.Romance],
             priority=ya_fiction_priority,
-            **ya_common_args
+            **ya_common_args,
         )
     )
     ya_fiction_priority += 1
@@ -501,7 +501,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
             [genres.Science_Fiction],
             exclude_genres=[genres.Dystopian_SF, genres.Steampunk],
             priority=ya_fiction_priority,
-            **ya_common_args
+            **ya_common_args,
         )
     )
     ya_fiction_priority += 1
@@ -511,7 +511,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
             library,
             [genres.Steampunk],
             priority=ya_fiction_priority,
-            **ya_common_args
+            **ya_common_args,
         )
     )
     ya_fiction_priority += 1
@@ -525,7 +525,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
         fiction=False,
         sublanes=[],
         priority=priority,
-        **ya_common_args
+        **ya_common_args,
     )
     priority += 1
     sublanes.append(ya_nonfiction)
@@ -539,7 +539,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
             display_name="Best Sellers",
             fiction=False,
             priority=ya_nonfiction_priority,
-            **ya_common_args
+            **ya_common_args,
         )
         ya_nonfiction_priority += 1
         ya_nonfiction_best_sellers.list_datasource = nyt_data_source
@@ -552,7 +552,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
             [genres.Biography_Memoir],
             display_name="Biography",
             priority=ya_nonfiction_priority,
-            **ya_common_args
+            **ya_common_args,
         )
     )
     ya_nonfiction_priority += 1
@@ -563,7 +563,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
             [genres.History, genres.Social_Sciences],
             display_name="History & Sociology",
             priority=ya_nonfiction_priority,
-            **ya_common_args
+            **ya_common_args,
         )
     )
     ya_nonfiction_priority += 1
@@ -573,7 +573,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
             library,
             [genres.Life_Strategies],
             priority=ya_nonfiction_priority,
-            **ya_common_args
+            **ya_common_args,
         )
     )
     ya_nonfiction_priority += 1
@@ -583,7 +583,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
             library,
             [genres.Religion_Spirituality],
             priority=ya_nonfiction_priority,
-            **ya_common_args
+            **ya_common_args,
         )
     )
     ya_nonfiction_priority += 1
@@ -600,7 +600,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
         fiction=None,
         sublanes=[],
         priority=priority,
-        **children_common_args
+        **children_common_args,
     )
     priority += 1
     sublanes.append(children)
@@ -613,7 +613,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
             library=library,
             display_name="Best Sellers",
             priority=children_priority,
-            **children_common_args
+            **children_common_args,
         )
         children_priority += 1
         children_best_sellers.list_datasource = nyt_data_source
@@ -667,7 +667,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
         library=library,
         display_name="Poetry Books",
         priority=children_priority,
-        **children_common_args
+        **children_common_args,
     )
     children_priority += 1
     children_poetry.add_genre(genres.Poetry.name)
@@ -679,7 +679,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
         library=library,
         display_name="Folklore",
         priority=children_priority,
-        **children_common_args
+        **children_common_args,
     )
     children_priority += 1
     children_folklore.add_genre(genres.Folklore.name)
@@ -692,7 +692,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
         display_name="Fantasy",
         fiction=True,
         priority=children_priority,
-        **children_common_args
+        **children_common_args,
     )
     children_priority += 1
     children_fantasy.add_genre(genres.Fantasy.name)
@@ -705,7 +705,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
         display_name="Science Fiction",
         fiction=True,
         priority=children_priority,
-        **children_common_args
+        **children_common_args,
     )
     children_priority += 1
     children_sf.add_genre(genres.Science_Fiction.name)
@@ -718,7 +718,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
         display_name="Realistic Fiction",
         fiction=True,
         priority=children_priority,
-        **children_common_args
+        **children_common_args,
     )
     children_priority += 1
     realistic_fiction.add_genre(genres.Literary_Fiction.name)
@@ -730,7 +730,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
         library=library,
         display_name="Comics & Graphic Novels",
         priority=children_priority,
-        **children_common_args
+        **children_common_args,
     )
     children_priority += 1
     children_graphic_novels.add_genre(genres.Comics_Graphic_Novels.name)
@@ -742,7 +742,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
         library=library,
         display_name="Biography",
         priority=children_priority,
-        **children_common_args
+        **children_common_args,
     )
     children_priority += 1
     children_biography.add_genre(genres.Biography_Memoir.name)
@@ -754,7 +754,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
         library=library,
         display_name="Historical Fiction",
         priority=children_priority,
-        **children_common_args
+        **children_common_args,
     )
     children_priority += 1
     children_historical_fiction.add_genre(genres.Historical_Fiction.name)
@@ -768,7 +768,7 @@ def create_lanes_for_large_collection(_db, library, languages, priority=0):
         fiction=False,
         genres=[],
         priority=children_priority,
-        **children_common_args
+        **children_common_args,
     )
     children_priority += 1
     informational.add_genre(genres.Biography_Memoir.name, inclusive=False)
@@ -863,7 +863,7 @@ def create_lane_for_small_collection(_db, library, parent, languages, priority=0
         fiction=True,
         audiences=ADULT,
         priority=sublane_priority,
-        **common_args
+        **common_args,
     )
     sublane_priority += 1
 
@@ -875,7 +875,7 @@ def create_lane_for_small_collection(_db, library, parent, languages, priority=0
         fiction=False,
         audiences=ADULT,
         priority=sublane_priority,
-        **common_args
+        **common_args,
     )
     sublane_priority += 1
 
@@ -887,7 +887,7 @@ def create_lane_for_small_collection(_db, library, parent, languages, priority=0
         fiction=None,
         audiences=YA_CHILDREN,
         priority=sublane_priority,
-        **common_args
+        **common_args,
     )
     sublane_priority += 1
 
@@ -899,7 +899,7 @@ def create_lane_for_small_collection(_db, library, parent, languages, priority=0
         parent=parent,
         sublanes=[adult_fiction, adult_nonfiction, ya_children],
         priority=priority,
-        **common_args
+        **common_args,
     )
     priority += 1
     return priority
@@ -980,7 +980,7 @@ class WorkBasedLane(DynamicLane):
 
         children = children or list()
 
-        super(WorkBasedLane, self).initialize(
+        super().initialize(
             library, display_name=display_name, children=children, **kwargs
         )
 
@@ -1007,7 +1007,7 @@ class WorkBasedLane(DynamicLane):
         """Add another Worklist as a child of this one and change its
         configuration to make sure its results fit in with this lane.
         """
-        super(WorkBasedLane, self).append_child(worklist)
+        super().append_child(worklist)
         worklist.languages = self.languages
         worklist.audiences = self.audiences
 
@@ -1019,7 +1019,7 @@ class WorkBasedLane(DynamicLane):
         :param patron: A Patron
         :return: A boolean
         """
-        superclass_ok = super(WorkBasedLane, self).accessible_to(patron)
+        superclass_ok = super().accessible_to(patron)
         return superclass_ok and (
             not self.work or self.work.age_appropriate_for_patron(patron)
         )
@@ -1044,7 +1044,7 @@ class RecommendationLane(WorkBasedLane):
         :raises: CannotLoadConfiguration if `novelist_api` is not provided
         and no Novelist integration is configured for this library.
         """
-        super(RecommendationLane, self).__init__(
+        super().__init__(
             library,
             work,
             display_name=display_name,
@@ -1126,7 +1126,7 @@ class SeriesLane(DynamicLane):
     def __init__(self, library, series_name, parent=None, **kwargs):
         if not series_name:
             raise ValueError("SeriesLane can't be created without series")
-        super(SeriesLane, self).initialize(library, display_name=series_name, **kwargs)
+        super().initialize(library, display_name=series_name, **kwargs)
         self.series = series_name
         if parent:
             parent.append_child(self)
@@ -1202,7 +1202,7 @@ class ContributorLane(DynamicLane):
         self.contributor_key = (
             self.contributor.display_name or self.contributor.sort_name
         )
-        super(ContributorLane, self).initialize(
+        super().initialize(
             library,
             display_name=self.contributor_key,
             audiences=audiences,
@@ -1260,7 +1260,7 @@ class RelatedBooksLane(WorkBasedLane):
     )
 
     def __init__(self, library, work, display_name=None, novelist_api=None):
-        super(RelatedBooksLane, self).__init__(
+        super().__init__(
             library,
             work,
             display_name=display_name,
@@ -1269,7 +1269,7 @@ class RelatedBooksLane(WorkBasedLane):
         sublanes = self._get_sublanes(_db, novelist_api)
         if not sublanes:
             raise ValueError(
-                "No related books for %s by %s" % (self.work.title, self.work.author)
+                f"No related books for {self.work.title} by {self.work.author}"
             )
         self.children = sublanes
 
@@ -1398,12 +1398,12 @@ class CrawlableCollectionBasedLane(CrawlableLane):
             # to the libraries that might use them.
             library = None
             collections = library_or_collections
-            identifier = " / ".join(sorted([x.name for x in collections]))
+            identifier = " / ".join(sorted(x.name for x in collections))
             if len(collections) == 1:
                 self.collection_feed = True
                 self.collection_name = collections[0].name
 
-        super(CrawlableCollectionBasedLane, self).initialize(
+        super().initialize(
             library,
             "Crawlable feed: %s" % identifier,
         )
@@ -1433,7 +1433,7 @@ class CrawlableCustomListBasedLane(CrawlableLane):
 
     def initialize(self, library, customlist):
         self.customlist_name = customlist.name
-        super(CrawlableCustomListBasedLane, self).initialize(
+        super().initialize(
             library,
             "Crawlable feed: %s" % self.customlist_name,
             customlists=[customlist],
@@ -1456,7 +1456,7 @@ class KnownOverviewFacetsWorkList(WorkList):
         :param facets: A Facets object to be used when generating a grouped
            feed.
         """
-        super(KnownOverviewFacetsWorkList, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.facets = facets
 
     def overview_facets(self, _db, facets):
@@ -1479,13 +1479,13 @@ class JackpotFacets(Facets):
     @classmethod
     def default_facet(cls, config, facet_group_name):
         if facet_group_name != cls.AVAILABILITY_FACET_GROUP_NAME:
-            return super(JackpotFacets, cls).default_facet(config, facet_group_name)
+            return super().default_facet(config, facet_group_name)
         return cls.AVAILABLE_NOW
 
     @classmethod
     def available_facets(cls, config, facet_group_name):
         if facet_group_name != cls.AVAILABILITY_FACET_GROUP_NAME:
-            return super(JackpotFacets, cls).available_facets(config, facet_group_name)
+            return super().available_facets(config, facet_group_name)
 
         return [
             cls.AVAILABLE_NOW,
@@ -1518,7 +1518,7 @@ class JackpotWorkList(WorkList):
         :param library: A Library
         :param facets: A Facets object.
         """
-        super(JackpotWorkList, self).initialize(library)
+        super().initialize(library)
 
         # Initialize a list of child Worklists; one for each test that
         # a client might need to run.

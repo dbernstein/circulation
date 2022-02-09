@@ -1,4 +1,3 @@
-# encoding: utf-8
 # ExternalIntegration, ExternalIntegrationLink, ConfigurationSetting
 import inspect
 import json
@@ -32,13 +31,13 @@ class ExternalIntegrationLink(Base, HasSessionCache):
     # These string literals may be stored in the database, so changes to them
     # may need to be accompanied by a DB migration.
     COVERS = "covers_mirror"
-    COVERS_KEY = "{0}_integration_id".format(COVERS)
+    COVERS_KEY = f"{COVERS}_integration_id"
 
     OPEN_ACCESS_BOOKS = "books_mirror"
-    OPEN_ACCESS_BOOKS_KEY = "{0}_integration_id".format(OPEN_ACCESS_BOOKS)
+    OPEN_ACCESS_BOOKS_KEY = f"{OPEN_ACCESS_BOOKS}_integration_id"
 
     PROTECTED_ACCESS_BOOKS = "protected_access_books_mirror"
-    PROTECTED_ACCESS_BOOKS_KEY = "{0}_integration_id".format(PROTECTED_ACCESS_BOOKS)
+    PROTECTED_ACCESS_BOOKS_KEY = f"{PROTECTED_ACCESS_BOOKS}_integration_id"
 
     MARC = "MARC_mirror"
 
@@ -81,10 +80,10 @@ class ExternalIntegrationLink(Base, HasSessionCache):
 
         settings.append(
             {
-                "key": "{0}_integration_id".format(mirror_type.lower()),
+                "key": f"{mirror_type.lower()}_integration_id",
                 "label": _(mirror_label),
                 "description": _(
-                    "Any {0} encountered while importing content from this collection "
+                    "Any {} encountered while importing content from this collection "
                     "can be mirrored to a server you control.".format(
                         mirror_description_type
                     )
@@ -93,9 +92,7 @@ class ExternalIntegrationLink(Base, HasSessionCache):
                 "options": [
                     {
                         "key": NO_MIRROR_INTEGRATION,
-                        "label": _(
-                            "None - Do not mirror {0}".format(mirror_description_type)
-                        ),
+                        "label": _(f"None - Do not mirror {mirror_description_type}"),
                     }
                 ],
             }
@@ -377,9 +374,7 @@ class ExternalIntegration(Base):
 
         integrations = integrations.all()
         if len(integrations) > 1:
-            logging.warning(
-                "Multiple integrations found for '%s'/'%s'" % (protocol, goal)
-            )
+            logging.warning(f"Multiple integrations found for '{protocol}'/'{goal}'")
 
         if [i for i in integrations if i.libraries] and not library:
             raise ValueError(
@@ -520,7 +515,7 @@ class ExternalIntegration(Base):
         lines.append("ID: %s" % self.id)
         if self.name:
             lines.append("Name: %s" % self.name)
-        lines.append("Protocol/Goal: %s/%s" % (self.protocol, self.goal))
+        lines.append(f"Protocol/Goal: {self.protocol}/{self.goal}")
 
         def key(setting):
             if setting.library:
@@ -535,9 +530,9 @@ class ExternalIntegration(Base):
             if setting.value is None:
                 # The setting has no value. Ignore it.
                 continue
-            explanation = "%s='%s'" % (setting.key, setting.value)
+            explanation = f"{setting.key}='{setting.value}'"
             if setting.library:
-                explanation = "%s (applies only to %s)" % (
+                explanation = "{} (applies only to {})".format(
                     explanation,
                     setting.library.name,
                 )
@@ -650,7 +645,7 @@ class ConfigurationSetting(Base, HasSessionCache):
         for setting in sorted(site_wide_settings, key=lambda s: s.key):
             if setting.value is None:
                 continue
-            lines.append("%s='%s'" % (setting.key, setting.value))
+            lines.append(f"{setting.key}='{setting.value}'")
         return lines
 
     @classmethod
@@ -774,7 +769,7 @@ class ConfigurationSetting(Base, HasSessionCache):
             self.value = default
         return self.value
 
-    MEANS_YES = set(["true", "t", "yes", "y"])
+    MEANS_YES = {"true", "t", "yes", "y"}
 
     @property
     def bool_value(self):
@@ -971,7 +966,7 @@ class ConfigurationAttribute(Enum):
     FORMAT = "format"
 
 
-class ConfigurationOption(object):
+class ConfigurationOption:
     """Key-value pair containing information about configuration attribute option"""
 
     def __init__(self, key, label):
@@ -1070,7 +1065,7 @@ class HasConfigurationSettings(metaclass=ABCMeta):
         raise NotImplementedError()
 
 
-class ConfigurationMetadata(object):
+class ConfigurationMetadata:
     """Contains configuration metadata"""
 
     _counter = 0
@@ -1432,7 +1427,7 @@ class ConfigurationGrouping(HasConfigurationSettings):
         return list(cls.to_settings_generator())
 
 
-class ConfigurationFactory(object):
+class ConfigurationFactory:
     """Factory creating new instances of ConfigurationGrouping class descendants."""
 
     @contextmanager

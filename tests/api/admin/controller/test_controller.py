@@ -68,7 +68,7 @@ class AdminControllerTest(CirculationControllerTest):
     BOOKS = []
 
     def setup_method(self):
-        super(AdminControllerTest, self).setup_method()
+        super().setup_method()
         ConfigurationSetting.sitewide(
             self._db, Configuration.SECRET_KEY
         ).value = "a secret"
@@ -321,7 +321,7 @@ class TestAdminCirculationManagerController(AdminControllerTest):
 
 class TestSignInController(AdminControllerTest):
     def setup_method(self):
-        super(TestSignInController, self).setup_method()
+        super().setup_method()
         self.admin.credential = json.dumps(
             {
                 "access_token": "abc123",
@@ -361,28 +361,18 @@ class TestSignInController(AdminControllerTest):
             pw_admin, ignore = create(self._db, Admin, email="pw@nypl.org")
             pw_admin.password = "password"
             assert 2 == len(ctrl.admin_auth_providers)
-            assert (
-                set(
-                    [
-                        GoogleOAuthAdminAuthenticationProvider.NAME,
-                        PasswordAdminAuthenticationProvider.NAME,
-                    ]
-                )
-                == set([provider.NAME for provider in ctrl.admin_auth_providers])
-            )
+            assert {
+                GoogleOAuthAdminAuthenticationProvider.NAME,
+                PasswordAdminAuthenticationProvider.NAME,
+            } == {provider.NAME for provider in ctrl.admin_auth_providers}
 
             # Only an admin with a password.
             self._db.delete(self.admin)
             assert 2 == len(ctrl.admin_auth_providers)
-            assert (
-                set(
-                    [
-                        GoogleOAuthAdminAuthenticationProvider.NAME,
-                        PasswordAdminAuthenticationProvider.NAME,
-                    ]
-                )
-                == set([provider.NAME for provider in ctrl.admin_auth_providers])
-            )
+            assert {
+                GoogleOAuthAdminAuthenticationProvider.NAME,
+                PasswordAdminAuthenticationProvider.NAME,
+            } == {provider.NAME for provider in ctrl.admin_auth_providers}
 
             # No admins. Someone new could still log in with google if domains are
             # configured.
@@ -751,17 +741,17 @@ class TestSignInController(AdminControllerTest):
 
 class TestPatronController(AdminControllerTest):
     def setup_method(self):
-        super(TestPatronController, self).setup_method()
+        super().setup_method()
         self.admin.add_role(AdminRole.LIBRARIAN, self._default_library)
 
     def test__load_patrondata(self):
         """Test the _load_patrondata helper method."""
 
-        class MockAuthenticator(object):
+        class MockAuthenticator:
             def __init__(self, providers):
                 self.providers = providers
 
-        class MockAuthenticationProvider(object):
+        class MockAuthenticationProvider:
             def __init__(self, patron_dict):
                 self.patron_dict = patron_dict
 
@@ -898,7 +888,7 @@ class TestPatronController(AdminControllerTest):
 
 class TestTimestampsController(AdminControllerTest):
     def setup_method(self):
-        super(TestTimestampsController, self).setup_method()
+        super().setup_method()
         for timestamp in self._db.query(Timestamp):
             self._db.delete(timestamp)
 
@@ -958,9 +948,12 @@ class TestTimestampsController(AdminControllerTest):
             self.admin.add_role(AdminRole.SYSTEM_ADMIN)
             response = self.manager.timestamps_controller.diagnostics()
 
-        assert set(response.keys()) == set(
-            ["coverage_provider", "monitor", "script", "other"]
-        )
+        assert set(response.keys()) == {
+            "coverage_provider",
+            "monitor",
+            "script",
+            "other",
+        }
 
         cp_service = response["coverage_provider"]
         cp_name, cp_collection = list(cp_service.items())[0]
@@ -1007,7 +1000,7 @@ class TestTimestampsController(AdminControllerTest):
 
 class TestFeedController(AdminControllerTest):
     def setup_method(self):
-        super(TestFeedController, self).setup_method()
+        super().setup_method()
         self.admin.add_role(AdminRole.LIBRARIAN, self._default_library)
 
     def test_complaints(self):
@@ -1088,7 +1081,7 @@ class TestFeedController(AdminControllerTest):
 
 class TestCustomListsController(AdminControllerTest):
     def setup_method(self):
-        super(TestCustomListsController, self).setup_method()
+        super().setup_method()
         self.admin.add_role(AdminRole.LIBRARIAN, self._default_library)
 
     def test_custom_lists_get(self):
@@ -1421,7 +1414,7 @@ class TestCustomListsController(AdminControllerTest):
         assert list.id == int(response.get_data(as_text=True))
 
         assert "new name" == list.name
-        assert set([w2, w3]) == set([entry.work for entry in list.entries])
+        assert {w2, w3} == {entry.work for entry in list.entries}
         assert new_collections == list.collections
 
         # If we were using a real search engine instance, the lane's size would be set
@@ -1542,7 +1535,7 @@ class TestCustomListsController(AdminControllerTest):
 
 class TestLanesController(AdminControllerTest):
     def setup_method(self):
-        super(TestLanesController, self).setup_method()
+        super().setup_method()
         self.admin.add_role(AdminRole.LIBRARY_MANAGER, self._default_library)
 
     def test_lanes_get(self):
@@ -2084,7 +2077,7 @@ class TestDashboardController(AdminControllerTest):
 
         # Now verify that this works by passing incoming query
         # parameters into a LocalAnalyticsExporter object.
-        class MockLocalAnalyticsExporter(object):
+        class MockLocalAnalyticsExporter:
             def export(self, _db, date_start, date_end, locations, library):
                 self.called_with = (_db, date_start, date_end, locations, library)
                 return "A CSV file"
@@ -2409,7 +2402,7 @@ class SettingsControllerTest(AdminControllerTest):
     """Test some part of the settings controller."""
 
     def setup_method(self):
-        super(SettingsControllerTest, self).setup_method()
+        super().setup_method()
         # Delete any existing patron auth services created by controller test setup.
         for auth_service in self._db.query(ExternalIntegration).filter(
             ExternalIntegration.goal == ExternalIntegration.PATRON_AUTH_GOAL
@@ -2516,7 +2509,7 @@ class TestSettingsController(SettingsControllerTest):
     def test_get_integration_protocols(self):
         """Test the _get_integration_protocols helper method."""
 
-        class Protocol(object):
+        class Protocol:
             __module__ = "my name"
             NAME = "my label"
             DESCRIPTION = "my description"

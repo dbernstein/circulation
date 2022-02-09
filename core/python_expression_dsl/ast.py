@@ -181,7 +181,7 @@ class BinaryExpression(Expression):
         """
         if not isinstance(operator, Operator):
             raise ValueError(
-                "Argument 'operator' must be an instance of {0} class".format(Operator)
+                f"Argument 'operator' must be an instance of {Operator} class"
             )
 
         self._operator = operator

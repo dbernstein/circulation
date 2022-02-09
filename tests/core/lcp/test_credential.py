@@ -11,7 +11,7 @@ from core.testing import DatabaseTest
 
 class TestCredentialFactory(DatabaseTest):
     def setup_method(self):
-        super(TestCredentialFactory, self).setup_method()
+        super().setup_method()
 
         self._factory = LCPCredentialFactory()
         self._patron = self._patron()

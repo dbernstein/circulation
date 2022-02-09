@@ -1,4 +1,3 @@
-# encoding: utf-8
 # Admin, AdminRole
 
 
@@ -238,7 +237,7 @@ class AdminRole(Base, HasSessionCache):
         return dict(role=self.role)
 
     def __repr__(self):
-        return "<AdminRole: role=%s library=%s admin=%s>" % (
+        return "<AdminRole: role={} library={} admin={}>".format(
             self.role,
             (self.library and self.library.short_name),
             self.admin.email,

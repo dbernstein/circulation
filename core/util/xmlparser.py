@@ -3,7 +3,7 @@ from io import BytesIO
 from lxml import etree
 
 
-class XMLParser(object):
+class XMLParser:
 
     """Helper functions to process XML data."""
 

@@ -1,4 +1,3 @@
-# encoding: utf-8
 import pytest
 
 from core.model.complaint import Complaint
@@ -8,7 +7,7 @@ from core.util.datetime_helpers import utc_now
 
 class TestComplaint(DatabaseTest):
     def setup_method(self):
-        super(TestComplaint, self).setup_method()
+        super().setup_method()
         self.edition, self.pool = self._edition(with_license_pool=True)
         self.type = "http://librarysimplified.org/terms/problem/wrong-genre"
 

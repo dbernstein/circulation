@@ -1,4 +1,3 @@
-# encoding: utf-8
 # Credential, DRMDeviceIdentifier, DelegatedPatronIdentifier
 import datetime
 import uuid
@@ -298,12 +297,12 @@ class Credential(Base):
     def __repr__(self):
         return (
             "<Credential("
-            "data_source_id={0}, "
-            "patron_id={1}, "
-            "collection_id={2}, "
-            "type={3}, "
-            "credential={4}, "
-            "expires={5}>)".format(
+            "data_source_id={}, "
+            "patron_id={}, "
+            "collection_id={}, "
+            "type={}, "
+            "credential={}, "
+            "expires={}>)".format(
                 self.data_source_id,
                 self.patron_id,
                 self.collection_id,

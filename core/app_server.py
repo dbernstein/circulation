@@ -155,7 +155,7 @@ def compressible(f):
     return compressor
 
 
-class ErrorHandler(object):
+class ErrorHandler:
     def __init__(self, app, debug=False):
         """Constructor.
 
@@ -254,7 +254,7 @@ class ErrorHandler(object):
         return response
 
 
-class HeartbeatController(object):
+class HeartbeatController:
 
     HEALTH_CHECK_TYPE = "application/vnd.health+json"
     VERSION_FILENAME = ".version"
@@ -272,7 +272,7 @@ class HeartbeatController(object):
         return make_response(data, 200, {"Content-Type": self.HEALTH_CHECK_TYPE})
 
 
-class URNLookupController(object):
+class URNLookupController:
     """A controller for looking up OPDS entries for specific books,
     identified in terms of their Identifier URNs.
     """
@@ -344,7 +344,7 @@ class URNLookupController(object):
         return OPDSFeedResponse(str(opds_feed))
 
 
-class URNLookupHandler(object):
+class URNLookupHandler:
     """A helper for URNLookupController that takes URNs as input and looks
     up their OPDS entries.
 
@@ -419,7 +419,7 @@ class URNLookupHandler(object):
         """
 
 
-class ComplaintController(object):
+class ComplaintController:
     """A controller to register complaints against objects."""
 
     def register(self, license_pool, raw_data):

@@ -61,9 +61,7 @@ class DoomedOPDSImporter(OPDSImporter):
     def import_edition_from_metadata(self, metadata, *args):
         if metadata.title == "Johnny Crow's Party":
             # This import succeeds.
-            return super(DoomedOPDSImporter, self).import_edition_from_metadata(
-                metadata, *args
-            )
+            return super().import_edition_from_metadata(metadata, *args)
         else:
             # Any other import fails.
             raise Exception("Utter failure!")
@@ -75,9 +73,7 @@ class DoomedWorkOPDSImporter(OPDSImporter):
     def update_work_for_edition(self, edition, *args, **kwargs):
         if edition.title == "Johnny Crow's Party":
             # This import succeeds.
-            return super(DoomedWorkOPDSImporter, self).update_work_for_edition(
-                edition, *args, **kwargs
-            )
+            return super().update_work_for_edition(edition, *args, **kwargs)
         else:
             # Any other import fails.
             raise Exception("Utter work failure!")
@@ -94,7 +90,7 @@ class OPDSTest(DatabaseTest):
 
 class TestMetadataWranglerOPDSLookup(OPDSTest):
     def setup_method(self):
-        super(TestMetadataWranglerOPDSLookup, self).setup_method()
+        super().setup_method()
         self.integration = self._external_integration(
             ExternalIntegration.METADATA_WRANGLER,
             goal=ExternalIntegration.METADATA_GOAL,
@@ -147,7 +143,7 @@ class TestMetadataWranglerOPDSLookup(OPDSTest):
         # With both authentication and a specific Collection,
         # a URL is returned.
         lookup.shared_secret = "secret"
-        expected = "%s%s/banana" % (
+        expected = "{}{}/banana".format(
             lookup.base_url,
             self.collection.metadata_identifier,
         )
@@ -249,7 +245,7 @@ class TestMetadataWranglerOPDSLookup(OPDSTest):
 
             def _feed_self_test(self, title, method, *args):
                 self.feed_self_tests.append((title, method, args))
-                return "A feed self-test for %s: %s" % (
+                return "A feed self-test for {}: {}".format(
                     self.collection.unique_account_id,
                     title,
                 )
@@ -401,7 +397,7 @@ class TestMetadataWranglerOPDSLookup(OPDSTest):
 
 class OPDSImporterTest(OPDSTest):
     def setup_method(self):
-        super(OPDSImporterTest, self).setup_method()
+        super().setup_method()
         self.content_server_feed = self.sample_opds("content_server.opds")
         self.content_server_mini_feed = self.sample_opds("content_server_mini.opds")
         self.audiobooks_opds = self.sample_opds("audiobooks.opds")
@@ -1097,7 +1093,7 @@ class TestOPDSImporter(OPDSImporterTest):
 
         # Three measurements have been added to the 'mouse' edition.
         popularity, quality, rating = sorted(
-            [x for x in mouse.primary_identifier.measurements if x.is_most_recent],
+            (x for x in mouse.primary_identifier.measurements if x.is_most_recent),
             key=lambda x: x.quantity_measured,
         )
 
@@ -1220,9 +1216,9 @@ class TestOPDSImporter(OPDSImporterTest):
         assert 2 == len(works_g)
 
         # The pools have presentation editions.
-        assert set(["The Green Mouse", "Johnny Crow's Party"]) == set(
-            [x.presentation_edition.title for x in pools_g]
-        )
+        assert {"The Green Mouse", "Johnny Crow's Party"} == {
+            x.presentation_edition.title for x in pools_g
+        }
 
         # The information used to create the first LicensePool said
         # that the licensing authority is Project Gutenberg, so that's used
@@ -1230,9 +1226,9 @@ class TestOPDSImporter(OPDSImporterTest):
         # to create the second LicensePool didn't include a data source,
         # so the source of the OPDS feed (the open-access content server)
         # was used.
-        assert set([DataSource.GUTENBERG, DataSource.OA_CONTENT_SERVER]) == set(
-            [pool.data_source.name for pool in pools_g]
-        )
+        assert {DataSource.GUTENBERG, DataSource.OA_CONTENT_SERVER} == {
+            pool.data_source.name for pool in pools_g
+        }
 
     def test_import_with_unrecognized_distributor_creates_distributor(self):
         """We get a book from a previously unknown data source, with a license
@@ -1631,8 +1627,7 @@ class TestOPDSImporter(OPDSImporterTest):
 
             def _open_access_links(self, metadatas):
                 self._open_access_links_called_with = metadatas
-                for i in self.open_access_links:
-                    yield i
+                yield from self.open_access_links
 
             def _is_open_access_link(self, url, type):
                 self._is_open_access_link_called_with.append((url, type))
@@ -1812,7 +1807,7 @@ class TestOPDSImporter(OPDSImporterTest):
         assert DeliveryMechanism.NO_DRM == lpdm.delivery_mechanism.drm_scheme
 
 
-class TestCombine(object):
+class TestCombine:
     """Test that OPDSImporter.combine combines dictionaries in sensible
     ways.
     """
@@ -1919,7 +1914,7 @@ class TestCombine(object):
 class TestMirroring(OPDSImporterTest):
     @pytest.fixture()
     def http(self):
-        class DummyHashedHttpClient(object):
+        class DummyHashedHttpClient:
             def __init__(self):
                 self.responses = {}
                 self.requests = []
@@ -2591,19 +2586,15 @@ class TestOPDSImportMonitor(OPDSImporterTest):
         # The edition's primary identifier has some cover links whose
         # relative URL have been resolved relative to the Collection's
         # external_account_id.
-        covers = set(
-            [
-                x.resource.url
-                for x in editions[0].primary_identifier.links
-                if x.rel == Hyperlink.IMAGE
-            ]
-        )
-        assert covers == set(
-            [
-                "http://root-url/broken-cover-image",
-                "http://root-url/working-cover-image",
-            ]
-        )
+        covers = {
+            x.resource.url
+            for x in editions[0].primary_identifier.links
+            if x.rel == Hyperlink.IMAGE
+        }
+        assert covers == {
+            "http://root-url/broken-cover-image",
+            "http://root-url/working-cover-image",
+        }
 
         # The 202 status message in the feed caused a transient failure.
         # The exception caused a persistent failure.
@@ -2614,7 +2605,7 @@ class TestOPDSImportMonitor(OPDSImporterTest):
         )
         assert sorted(
             [CoverageRecord.TRANSIENT_FAILURE, CoverageRecord.PERSISTENT_FAILURE]
-        ) == sorted([x.status for x in coverage_records])
+        ) == sorted(x.status for x in coverage_records)
 
         identifier, ignore = Identifier.parse_urn(
             self._db, "urn:librarysimplified.org/terms/id/Gutenberg%20ID/10441"
@@ -2631,7 +2622,7 @@ class TestOPDSImportMonitor(OPDSImporterTest):
     def test_run_once(self):
         class MockOPDSImportMonitor(OPDSImportMonitor):
             def __init__(self, *args, **kwargs):
-                super(MockOPDSImportMonitor, self).__init__(*args, **kwargs)
+                super().__init__(*args, **kwargs)
                 self.responses = []
                 self.imports = []
 

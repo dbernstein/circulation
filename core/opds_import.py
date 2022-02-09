@@ -107,7 +107,7 @@ class AccessNotAuthenticated(Exception):
     """No authentication is configured for this service"""
 
 
-class SimplifiedOPDSLookup(object):
+class SimplifiedOPDSLookup:
     """Tiny integration class for the Simplified 'lookup' protocol."""
 
     LOOKUP_ENDPOINT = "lookup"
@@ -146,7 +146,7 @@ class SimplifiedOPDSLookup(object):
         return HTTP.get_with_timeout(url, **kwargs)
 
     def urn_args(self, identifiers):
-        return "&".join(set("urn=%s" % i.urn for i in identifiers))
+        return "&".join({"urn=%s" % i.urn for i in identifiers})
 
     def lookup(self, identifiers):
         """Retrieve an OPDS feed with metadata for the given identifiers."""
@@ -231,8 +231,7 @@ class MetadataWranglerOPDSLookup(SimplifiedOPDSLookup, HasSelfTests):
                 continue
 
             lookup = lookup_class.from_config(_db, c)
-            for i in lookup._run_collection_self_tests():
-                yield i
+            yield from lookup._run_collection_self_tests()
 
     def _run_collection_self_tests(self):
         """Run the self-test suite on the Collection associated with this
@@ -316,7 +315,7 @@ class MetadataWranglerOPDSLookup(SimplifiedOPDSLookup, HasSelfTests):
         result.result = lines
 
     def __init__(self, url, shared_secret=None, collection=None):
-        super(MetadataWranglerOPDSLookup, self).__init__(url)
+        super().__init__(url)
         self.shared_secret = shared_secret
         self.collection = collection
 
@@ -342,7 +341,7 @@ class MetadataWranglerOPDSLookup(SimplifiedOPDSLookup, HasSelfTests):
             headers = kwargs.get("headers", {})
             headers.update(self.authorization)
             kwargs["headers"] = headers
-        return super(MetadataWranglerOPDSLookup, self)._get(url, **kwargs)
+        return super()._get(url, **kwargs)
 
     def _post(self, url, data="", **kwargs):
         """Make an HTTP request. This method is overridden in the mock class."""
@@ -446,7 +445,7 @@ class MockSimplifiedOPDSLookup(SimplifiedOPDSLookup):
     def __init__(self, *args, **kwargs):
         self.requests = []
         self.responses = []
-        super(MockSimplifiedOPDSLookup, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def queue_response(self, status_code, headers={}, content=None):
         from .testing import MockRequestsResponse
@@ -492,7 +491,7 @@ class OPDSXMLParser(XMLParser):
     }
 
 
-class OPDSImporter(object):
+class OPDSImporter:
     """Imports editions and license pools from an OPDS feed.
     Creates Edition, LicensePool and Work rows in the database, if those
     don't already exist.
@@ -1536,7 +1535,7 @@ class OPDSImporter(object):
         description = message.message
         status_code = message.status_code
         if description and status_code:
-            exception = "%s: %s" % (status_code, description)
+            exception = f"{status_code}: {description}"
         elif status_code:
             exception = str(status_code)
         elif description:
@@ -1947,7 +1946,7 @@ class OPDSImportMonitor(CollectionMonitor, HasSelfTests, HasExternalIntegration)
                 else None
             )
 
-        super(OPDSImportMonitor, self).__init__(_db, collection)
+        super().__init__(_db, collection)
 
     @contextmanager
     def _get_configuration(
@@ -2018,7 +2017,7 @@ class OPDSImportMonitor(CollectionMonitor, HasSelfTests, HasExternalIntegration)
         headers = dict(headers) if headers else {}
         if self.username and self.password and not "Authorization" in headers:
             headers["Authorization"] = "Basic %s" % base64.b64encode(
-                "%s:%s" % (self.username, self.password)
+                f"{self.username}:{self.password}"
             )
 
         if self.custom_accept_header:
@@ -2220,7 +2219,7 @@ class OPDSImportMonitor(CollectionMonitor, HasSelfTests, HasExternalIntegration)
     def _get_feeds(self):
         feeds = []
         queue = [self.feed_url]
-        seen_links = set([])
+        seen_links = set()
 
         # First, follow the feed's next links until we reach a page with
         # nothing new. If any link raises an exception, nothing will be imported.

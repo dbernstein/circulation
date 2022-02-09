@@ -270,8 +270,7 @@ class EnkiAPI(BaseCirculationAPI, HasSelfTests):
             # the same collection.
         )
         response = self.request(url, params=args)
-        for metadata in BibliographicParser().process_all(response.content):
-            yield metadata
+        yield from BibliographicParser().process_all(response.content)
 
     def get_item(self, enki_id):
         """Retrieve bibliographic and availability information for
@@ -321,8 +320,7 @@ class EnkiAPI(BaseCirculationAPI, HasSelfTests):
         args["strt"] = strt
         args["qty"] = qty
         response = self.request(url, params=args)
-        for metadata in BibliographicParser().process_all(response.content):
-            yield metadata
+        yield from BibliographicParser().process_all(response.content)
 
     @classmethod
     def _epoch_to_struct(cls, epoch_string):
@@ -520,7 +518,7 @@ class MockEnkiAPI(EnkiAPI):
             _db, self.ENKI_LIBRARY_ID_KEY, library, collection.external_integration
         ).value = "c"
 
-        super(MockEnkiAPI, self).__init__(_db, collection, *args, **kwargs)
+        super().__init__(_db, collection, *args, **kwargs)
 
     def queue_response(self, status_code, headers={}, content=None):
         from core.testing import MockRequestsResponse
@@ -541,7 +539,7 @@ class MockEnkiAPI(EnkiAPI):
         )
 
 
-class BibliographicParser(object):
+class BibliographicParser:
     """Parses Enki's representation of book information into
     Metadata and CirculationData objects.
     """
@@ -723,7 +721,7 @@ class EnkiImport(CollectionMonitor, TimelineMonitor):
 
     def __init__(self, _db, collection, api_class=EnkiAPI, analytics=None):
         """Constructor."""
-        super(EnkiImport, self).__init__(_db, collection)
+        super().__init__(_db, collection)
         self._db = _db
         if callable(api_class):
             api = api_class(_db, collection)
@@ -875,7 +873,7 @@ class EnkiCollectionReaper(IdentifierSweepMonitor):
 
     def __init__(self, _db, collection, api_class=EnkiAPI):
         self._db = _db
-        super(EnkiCollectionReaper, self).__init__(self._db, collection)
+        super().__init__(self._db, collection)
         if callable(api_class):
             api = api_class(self._db, collection)
         else:

@@ -36,7 +36,7 @@ class MultipartS3Upload:
         )
 
     def upload_part(self, content):
-        logging.info("Uploading part %s of %s" % (self.part_number, self.filename))
+        logging.info(f"Uploading part {self.part_number} of {self.filename}")
         result = self.uploader.client.upload_part(
             Body=content,
             Bucket=self.bucket,
@@ -283,7 +283,7 @@ class S3Uploader(MirrorUploader):
         :param host: Host used by this integration
         :type host: string
         """
-        super(S3Uploader, self).__init__(integration, host)
+        super().__init__(integration, host)
 
         if not client_class:
             client_class = boto3.client
@@ -711,7 +711,7 @@ class MinIOUploader(S3Uploader):
         else:
             self.client = client_class
 
-        super(MinIOUploader, self).__init__(integration, client_class, host)
+        super().__init__(integration, client_class, host)
 
 
 # MirrorUploader.implementation will instantiate an MinIOUploader instance
@@ -787,7 +787,7 @@ class MockS3Uploader(S3Uploader):
             representation.set_as_mirrored(mirror_to)
 
 
-class MockS3Client(object):
+class MockS3Client:
     """This pool lets us test the real S3Uploader class with a mocked-up
     boto3 client.
     """

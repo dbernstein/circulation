@@ -1,4 +1,4 @@
-class EntryPoint(object):
+class EntryPoint:
 
     """A EntryPoint is a top-level entry point into a library's Lane structure
     that may apply additional filters to the Lane structure.

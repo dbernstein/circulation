@@ -13,7 +13,7 @@ class LCPCredentialType(Enum):
     LCP_HASHED_PASSPHRASE = "Hashed LCP Passphrase passed to the LCP License Server"
 
 
-class LCPCredentialFactory(object):
+class LCPCredentialFactory:
     """Generates patron's credentials used by the LCP License Server"""
 
     def __init__(self):
@@ -35,7 +35,7 @@ class LCPCredentialFactory(object):
         :type value: Optional[string]
         """
         self._logger.info(
-            'Getting or creating "{0}" credentials for {1} in "{2}" data source with value "{3}"'.format(
+            'Getting or creating "{}" credentials for {} in "{}" data source with value "{}"'.format(
                 credential_type, patron, data_source_type, value
             )
         )
@@ -49,7 +49,7 @@ class LCPCredentialFactory(object):
         transaction.commit()
 
         self._logger.info(
-            'Successfully {0} "{1}" {2} for {3} in "{4}" data source with value "{5}"'.format(
+            'Successfully {} "{}" {} for {} in "{}" data source with value "{}"'.format(
                 "created new" if is_new else "fetched existing",
                 credential_type,
                 credential,
