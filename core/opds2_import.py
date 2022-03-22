@@ -24,7 +24,9 @@ from core.configuration.ignored_identifier import (
 )
 from core.mirror import MirrorUploader
 from core.model.configuration import (
+    ConfigurationAttributeType,
     ConfigurationFactory,
+    ConfigurationMetadata,
     ConfigurationStorage,
     HasExternalIntegration,
 )
@@ -115,6 +117,19 @@ class RWPMManifestParser(object):
 class OPDS2ImporterConfiguration(IgnoredIdentifierConfiguration):
     """Contains configuration settings of OPDS2Importer.
     Currently empty, but maintaining it as a base class for others"""
+
+    custom_accept_header_setting = ConfigurationMetadata(
+        key=ExternalIntegration.CUSTOM_ACCEPT_HEADER,
+        label=_("Custom accept header"),
+        description=_(
+            "Some servers expect an accept header to decide which file to send. You can use */* if the server doesn't expect anything."
+        ),
+        type=ConfigurationAttributeType.TEXT,
+        required=False,
+        default="{0}, {1};q=0.9, */*;q=0.1".format(
+            OPDS2MediaTypesRegistry.OPDS_FEED.key, "application/json"
+        ),
+    )
 
 
 class OPDS2Importer(
