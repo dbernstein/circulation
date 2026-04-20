@@ -7,8 +7,8 @@ from collections.abc import Generator, Iterable
 from dataclasses import dataclass
 from functools import partial
 from threading import RLock
-from typing import Any, NamedTuple, Unpack, overload
-from urllib.parse import urlsplit
+from typing import Any, Literal, NamedTuple, Unpack, overload
+from urllib.parse import parse_qs, urlencode, urlparse, urlsplit, urlunparse
 
 import flask
 from pydantic import ValidationError
@@ -224,6 +224,11 @@ class OverdriveAPI(
         "%(host)s"
         + EVENTS_ENDPOINT_BASE
         + "?lastUpdateTime=%(lastupdatetime)s&limit=%(limit)s"
+    )
+    TITLE_EVENTS_ENDPOINT = (
+        "%(host)s"
+        + EVENTS_ENDPOINT_BASE
+        + "?lastTitleUpdateTime=%(lasttitleupdatetime)s&limit=%(limit)s"
     )
 
     AVAILABILITY_ENDPOINT_BASE = "/v2/collections/%(collection_token)s/products"
@@ -659,9 +664,16 @@ class OverdriveAPI(
         self,
         start: datetime.datetime | None = None,
         page_size: int = PAGE_SIZE_LIMIT,
+        sort_by: Literal["lastUpdateTime", "lastTitleUpdateTime"] = "lastUpdateTime",
     ) -> BookInfoEndpoint:
-        """Create an initial book info url."""
+        """Create an initial book info url.
 
+        :param start: Only include products updated after this datetime. Defaults to the Unix epoch.
+        :param page_size: Number of results per page, capped at PAGE_SIZE_LIMIT.
+        :param sort_by: Which timestamp field to filter and sort by.  Overdrive always returns
+            results in ascending order when either ``lastUpdateTime`` or ``lastTitleUpdateTime``
+            is used — all other sort options are ignored by the API.
+        """
         # if no start date specified, assume effect beginning of time.
         if not start:
             start = datetime.datetime(1970, 1, 1, 0, 0, 0, tzinfo=datetime.UTC)
@@ -669,19 +681,64 @@ class OverdriveAPI(
         self.log.info("Creating url for circulation changes since %s", last_update_time)
         last_update = last_update_time.strftime(self.TIME_FORMAT)
 
-        book_info_initial_endpoint = self.endpoint(
-            self.EVENTS_ENDPOINT,
-            # From https://developer.overdrive.com/apis/search:
-            # "**Note: When you search using the lastTitleUpdateTime or
-            # lastUpdateTime parameters, your results will be automatically
-            # sorted in ascending order (and all other sort options will be ignored)."
-            lastupdatetime=last_update,
-            limit=str(min(page_size, self.PAGE_SIZE_LIMIT)),
-            collection_token=self.collection_token,
-        )
-        endpoint: str = _make_link_safe(book_info_initial_endpoint)
+        # From https://developer.overdrive.com/apis/search:
+        # "**Note: When you search using the lastTitleUpdateTime or
+        # lastUpdateTime parameters, your results will be automatically
+        # sorted in ascending order (and all other sort options will be ignored)."
+        if sort_by == "lastTitleUpdateTime":
+            raw_endpoint = self.endpoint(
+                self.TITLE_EVENTS_ENDPOINT,
+                lasttitleupdatetime=last_update,
+                limit=str(min(page_size, self.PAGE_SIZE_LIMIT)),
+                collection_token=self.collection_token,
+            )
+        else:
+            raw_endpoint = self.endpoint(
+                self.EVENTS_ENDPOINT,
+                lastupdatetime=last_update,
+                limit=str(min(page_size, self.PAGE_SIZE_LIMIT)),
+                collection_token=self.collection_token,
+            )
+        return BookInfoEndpoint(_make_link_safe(raw_endpoint))
 
-        return BookInfoEndpoint(endpoint)
+    def book_info_endpoint_at_offset(
+        self, base_endpoint: BookInfoEndpoint, offset: int
+    ) -> BookInfoEndpoint:
+        """Return a copy of *base_endpoint* with the ``offset`` query-param set to *offset*.
+
+        If the URL already contains an ``offset`` parameter it is replaced;
+        otherwise the parameter is appended.
+
+        :param base_endpoint: The starting endpoint URL.
+        :param offset: The page offset to set.
+        """
+        parsed = urlparse(base_endpoint.url)
+        params = parse_qs(parsed.query, keep_blank_values=True)
+        params["offset"] = [str(offset)]
+        new_query = urlencode(params, doseq=True)
+        new_url = urlunparse(parsed._replace(query=new_query))
+        return BookInfoEndpoint(new_url)
+
+    def book_info_prev_page_endpoint(
+        self, current_endpoint: BookInfoEndpoint, page_size: int
+    ) -> BookInfoEndpoint | None:
+        """Return the endpoint for the page immediately before *current_endpoint*.
+
+        Determines the current page's offset from the URL's ``offset`` query
+        parameter (defaulting to 0 when absent) and subtracts *page_size*.
+        Returns ``None`` when the current page is already the first page
+        (offset ≤ 0).
+
+        :param current_endpoint: The endpoint of the page currently being processed.
+        :param page_size: Number of results per page.
+        """
+        parsed = urlparse(current_endpoint.url)
+        params = parse_qs(parsed.query, keep_blank_values=True)
+        current_offset = int(params.get("offset", ["0"])[0])
+        if current_offset <= 0:
+            return None
+        prev_offset = current_offset - page_size
+        return self.book_info_endpoint_at_offset(current_endpoint, max(prev_offset, 0))
 
     async def fetch_book_info_list(
         self,
@@ -689,14 +746,19 @@ class OverdriveAPI(
         fetch_metadata: bool = False,
         fetch_availability: bool = False,
         extractor_class: type[OverdriveRepresentationExtractor] | None = None,
-    ) -> tuple[list[dict[str, Any]], BookInfoEndpoint | None]:
-        """
-        This method is used to fetch a "page" of book data. Users can optionally fetch metadata and availability info
-        by using the fetch_metadata and fetch_availability parameters. Internally, an async http client is used to
-        parallelize the retrieval of the metadata and availability.  A list of book data is returned which can be
-        parsed or converted according to the needs of the client.  Additionally, we return the link to the next page
-        of book data. In this way, "page" retrievals are accelerated while allowing the client to retrieve chunks
-        in a deterministic and therefore retriable manner.
+    ) -> tuple[list[dict[str, Any]], BookInfoEndpoint | None, int]:
+        """Fetch a single page of book data from the Overdrive API.
+
+        Optionally fetch metadata and availability in parallel using an async
+        HTTP client.  Returns the page's books, the next-page endpoint (or
+        ``None`` when there are no more pages), and the total number of items
+        in the full result set (``totalItems`` from the API response).
+
+        :param endpoint: The endpoint URL for this page.
+        :param fetch_metadata: If True, fetch full metadata for each product in parallel.
+        :param fetch_availability: If True, fetch availability for each product in parallel.
+        :param extractor_class: Override the extractor used to parse link relations.
+        :return: ``(books, next_endpoint, total_items)``
         """
         base_url = self.endpoint(self.HOST_ENDPOINT_BASE)
         async with self._create_configured_async_client(base_url=base_url) as client:
@@ -709,6 +771,7 @@ class OverdriveAPI(
             next_endpoint: BookInfoEndpoint | None = (
                 BookInfoEndpoint(next_url) if next_url else None
             )
+            total_items: int = data.get("totalItems", 0)
             async_task_list = list()
             response_products = data.get("products")
             if response_products is None:
@@ -743,7 +806,7 @@ class OverdriveAPI(
 
             await asyncio.gather(*async_task_list)
 
-            return list(books.values()), next_endpoint
+            return list(books.values()), next_endpoint, total_items
 
     async def _get_availability_async(
         self, base_url: str, book_info: dict[str, Any], client: AsyncClient

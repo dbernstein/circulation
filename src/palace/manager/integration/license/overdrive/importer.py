@@ -4,7 +4,6 @@ from collections.abc import Set
 from dataclasses import dataclass
 from typing import Any
 
-import dateutil
 from sqlalchemy.orm import Session
 
 from palace.util.exceptions import PalaceValueError
@@ -39,6 +38,8 @@ class FeedImportResult:
     current_page: BookInfoEndpoint
     next_page: BookInfoEndpoint | None = None
     processed_count: int = 0
+    # Propagated across task.replace() calls for reverse-pagination state.
+    total_items: int | None = None
 
 
 class OverdriveImporter(LoggerMixin):
@@ -51,6 +52,7 @@ class OverdriveImporter(LoggerMixin):
         registry: LicenseProvidersRegistry,
         identifier_set: IdentifierSet | None = None,
         parent_identifier_set: IdentifierSet | None = None,
+        title_update_identifier_set: IdentifierSet | None = None,
         api: OverdriveAPI | None = None,
     ) -> None:
         """Constructor for the OverdriveImporter class.
@@ -60,6 +62,9 @@ class OverdriveImporter(LoggerMixin):
         :param registry: The license providers registry.
         :param identifier_set: The identifier set to use for the import.
         :param parent_identifier_set: The parent identifier set to use for the import.
+        :param title_update_identifier_set: Identifiers whose metadata was updated in
+            phase 1 (``import_title_updates``). Phase 2 skips metadata fetches for
+            these identifiers to avoid redundant work.
         :param api: The OverdriveAPI instance to use for the import.
         """
         self._db = db
@@ -74,6 +79,10 @@ class OverdriveImporter(LoggerMixin):
             # collections are much  smaller in the 20-70K range.
 
             self._parent_identifiers = parent_identifier_set.get()
+
+        self._title_update_identifiers: Set[IdentifierData] | None = None
+        if title_update_identifier_set is not None:
+            self._title_update_identifiers = title_update_identifier_set.get()
 
         if not registry.equivalent(collection.protocol, OverdriveAPI):
             raise PalaceValueError(
@@ -98,6 +107,54 @@ class OverdriveImporter(LoggerMixin):
             collection=self._collection,
         )
         return timestamp
+
+    def _default_replacement_policy(self) -> ReplacementPolicy:
+        return ReplacementPolicy(
+            identifiers=False,
+            subjects=True,
+            contributions=True,
+            formats=True,
+            links=True,
+        )
+
+    def _process_book_metadata(
+        self,
+        book: dict[str, Any],
+        policy: ReplacementPolicy,
+        apply_bibliographic: ApplyBibliographicCallable,
+    ) -> tuple[Identifier, bool]:
+        """Process metadata for a single book.
+
+        :param book: Book data dictionary; must contain a ``metadata`` key.
+        :param policy: Replacement policy for bibliographic updates.
+        :param apply_bibliographic: Callback to apply bibliographic updates.
+        :return: ``(identifier, changed)`` where *changed* is ``True`` when the
+            bibliographic data differed from what is already stored.
+        """
+        book = book.copy()
+
+        identifier, _ = Identifier.for_foreign_id(
+            self._db,
+            foreign_id=book.get("id"),
+            foreign_identifier_type=Identifier.OVERDRIVE_ID,
+        )
+        assert identifier
+
+        if not book.get("metadata"):
+            return identifier, False
+
+        bibliographic = self._extractor.book_info_to_bibliographic(book)
+        assert bibliographic
+
+        if bibliographic.needs_apply(self._db):
+            apply_bibliographic(
+                bibliographic,
+                collection_id=self._collection.id,
+                replace=policy,
+            )
+            return identifier, True
+
+        return identifier, False
 
     def _process_book(
         self,
@@ -134,21 +191,31 @@ class OverdriveImporter(LoggerMixin):
 
         changed: bool = False
 
+        identifier_data = IdentifierData.from_identifier(identifier)
+
+        # Skip metadata if it was already processed in the title-update phase.
+        already_in_title_update = (
+            self._title_update_identifiers is not None
+            and identifier_data in self._title_update_identifiers
+        )
+
         # We only need to look up metadata if we didn't already fetch it and it was not in the parent identifier
         # set.  Why? Because the existence of the parent identifier set implies that the parent collection
         # has already been imported which would have included all the metadata.
-
-        if not fetch_metadata and (
-            not self._parent_identifiers
-            or IdentifierData.from_identifier(identifier)
-            not in self._parent_identifiers
+        if (
+            not fetch_metadata
+            and not already_in_title_update
+            and (
+                not self._parent_identifiers
+                or identifier_data not in self._parent_identifiers
+            )
         ):
             book["metadata"] = self._api.metadata_lookup(identifier=identifier)
 
         # we need to check that there is metadata because it is possible that we attempted to fetch it, but we
         # didn't get anything back from overdrive (ie from the book list fetch above) or we did not attempt to
         # fetch it because it was already processed by the parent collection.
-        if book.get("metadata"):
+        if book.get("metadata") and not already_in_title_update:
             bibliographic = self._extractor.book_info_to_bibliographic(book)
             # The bibliographic should never be null here because there is a non-null entry for metadata in the
             # book dictionary.  Mypy complains without an assertion or type hints.
@@ -185,129 +252,317 @@ class OverdriveImporter(LoggerMixin):
 
         return identifier, changed
 
-    def _all_books_out_of_scope(
+    def import_title_updates(
         self,
-        modified_since: datetime.datetime,
-        book_data: list[dict[str, Any]],
-    ) -> bool:
-        """Check if all books in the book_data are out of scope in terms of the date they were added.
+        *,
+        apply_bibliographic: ApplyBibliographicCallable,
+        import_all: bool = False,
+        modified_since: datetime.datetime | None = None,
+        endpoint: BookInfoEndpoint | None = None,
+        page_size: int = DEFAULT_PAGE_SIZE,
+        total_items: int | None = None,
+    ) -> FeedImportResult:
+        """Phase 1 import: process title-metadata changes in reverse chronological order.
 
-        This method is used to determine if we should continue to fetch the next page of books.
-        Overdrive does not provide a way to retrieve books that were added or modified since a given date.
-        They do however give us the "date_added" value for each book which we can use to determine
-        if the book was added before the modified_since date.
+        Iterates the product list sorted by ``lastTitleUpdateTime`` starting from the
+        **last** page (most recently changed) and works backwards.  For each book the
+        bibliographic hash is checked; when an unchanged book is encountered (and
+        ``import_all`` is ``False``) iteration stops immediately, since all remaining
+        books are older and also unchanged.
 
-        :param modified_since: The datetime to check if the books are out of scope.
-        :param book_data: The book data to check if the books are out of scope.
-        :return: True if all books are out of scope, False otherwise.
+        On the very first call (``endpoint`` and ``total_items`` both ``None``) this
+        method fetches the first page solely to determine ``totalItems`` and then
+        signals the caller to jump to the last page by returning a ``FeedImportResult``
+        whose ``next_page`` points to that last page and ``total_items`` carries the
+        count.  On subsequent calls it processes the given page in reverse order.
+
+        :param apply_bibliographic: Callback to queue bibliographic apply tasks.
+        :param import_all: When ``True`` the hash-based early exit is disabled and every
+            record is processed regardless of whether it has changed.
+        :param modified_since: Lower bound for the ``lastTitleUpdateTime`` filter.
+        :param endpoint: The page to process. ``None`` on the initial call.
+        :param page_size: Items per page (capped by the API limit).
+        :param total_items: Total items in the result set; supplied on all calls after
+            the initial one so the caller can re-use it without an extra API round-trip.
+        :return: :class:`FeedImportResult` with ``next_page`` pointing to the next page
+            to process (the *previous* page in chronological order), or ``None`` when
+            processing is complete.
         """
-        out_of_scope_count = 0
+        policy = self._default_replacement_policy()
 
-        for book in book_data:
-            date_added = book.get("date_added", None)
-            if not date_added:
-                # this should not happen, but if it does, we'll assume the book is not out of scope.
-                continue
+        self.log.info(
+            f"Starting title-update import for collection {self._collection.name} "
+            f"(id={self._collection.id}), modified_since={modified_since}."
+        )
 
-            date_added = dateutil.parser.parse(date_added)
-            if date_added < modified_since:
-                out_of_scope_count += 1
+        # --- Initial call: discover total_items and jump to the last page ---
+        if endpoint is None and total_items is None:
+            base_endpoint = self._api.book_info_initial_endpoint(
+                start=modified_since,
+                page_size=page_size,
+                sort_by="lastTitleUpdateTime",
+            )
+            book_data, _, discovered_total = asyncio.run(
+                self._api.fetch_book_info_list(
+                    base_endpoint,
+                    fetch_metadata=True,
+                    fetch_availability=False,
+                )
+            )
+            if discovered_total <= page_size:
+                # Single page: process it directly in reverse.
+                return self._process_title_updates_page(
+                    books=list(reversed(book_data)),
+                    current_endpoint=base_endpoint,
+                    page_size=page_size,
+                    total_items=discovered_total,
+                    import_all=import_all,
+                    policy=policy,
+                    apply_bibliographic=apply_bibliographic,
+                )
+            last_offset = ((discovered_total - 1) // page_size) * page_size
+            last_page_endpoint = self._api.book_info_endpoint_at_offset(
+                base_endpoint, last_offset
+            )
+            self.log.info(
+                f"Title-update import: {discovered_total} total items, "
+                f"jumping to last page offset={last_offset}."
+            )
+            return FeedImportResult(
+                current_page=base_endpoint,
+                next_page=last_page_endpoint,
+                processed_count=0,
+                total_items=discovered_total,
+            )
 
-        return out_of_scope_count == len(book_data)
+        # --- Subsequent pages ---
+        assert endpoint is not None
+        book_data, _, _ = asyncio.run(
+            self._api.fetch_book_info_list(
+                endpoint,
+                fetch_metadata=True,
+                fetch_availability=False,
+            )
+        )
+        return self._process_title_updates_page(
+            books=list(reversed(book_data)),
+            current_endpoint=endpoint,
+            page_size=page_size,
+            total_items=total_items,
+            import_all=import_all,
+            policy=policy,
+            apply_bibliographic=apply_bibliographic,
+        )
+
+    def _process_title_updates_page(
+        self,
+        *,
+        books: list[dict[str, Any]],
+        current_endpoint: BookInfoEndpoint,
+        page_size: int,
+        total_items: int | None,
+        import_all: bool,
+        policy: ReplacementPolicy,
+        apply_bibliographic: ApplyBibliographicCallable,
+    ) -> FeedImportResult:
+        """Process a single page of books for the title-update phase.
+
+        Books must already be supplied in the desired processing order (reverse
+        chronological, i.e. most recently changed first).
+
+        Returns a :class:`FeedImportResult` whose ``next_page`` is the previous page
+        endpoint, or ``None`` if processing should stop (early exit or first page
+        reached).
+        """
+        identifiers: list[Identifier] = []
+
+        for book in books:
+            identifier, changed = self._process_book_metadata(
+                book, policy, apply_bibliographic
+            )
+            identifiers.append(identifier)
+
+            if not changed and not import_all:
+                self.log.info(
+                    f"Title-update import: book {identifier} metadata unchanged — stopping."
+                )
+                if self._identifier_set is not None:
+                    self._identifier_set.add(*identifiers)
+                return FeedImportResult(
+                    current_page=current_endpoint,
+                    next_page=None,
+                    processed_count=len(identifiers),
+                    total_items=total_items,
+                )
+
+        if self._identifier_set is not None:
+            self._identifier_set.add(*identifiers)
+
+        prev_endpoint = self._api.book_info_prev_page_endpoint(
+            current_endpoint, page_size
+        )
+        self.log.info(
+            f"Title-update import: processed {len(identifiers)} books on page "
+            f"{current_endpoint.url}. Next page: {prev_endpoint}."
+        )
+        return FeedImportResult(
+            current_page=current_endpoint,
+            next_page=prev_endpoint,
+            processed_count=len(identifiers),
+            total_items=total_items,
+        )
 
     def import_collection(
         self,
         *,
         apply_bibliographic: ApplyBibliographicCallable,
         apply_circulation: ApplyCirculationCallable,
+        import_all: bool = False,
         modified_since: datetime.datetime | None = None,
         endpoint: BookInfoEndpoint | None = None,
         page_size: int = DEFAULT_PAGE_SIZE,
+        total_items: int | None = None,
     ) -> FeedImportResult:
-        """Import books from an OverDrive collection into the circulation manager.
+        """Phase 2 import: process availability (circulation) changes in reverse chronological order.
 
-        This method fetches book information from OverDrive's API and queues bibliographic
-        and circulation data for processing. It implements several optimizations:
+        Iterates the product list sorted by ``lastUpdateTime`` starting from the **last**
+        page and works backwards.  For each book:
 
-        1. **Metadata Fetching Strategy**:
-           - For main collections (no parent_identifier_set): Fetches metadata upfront in bulk
-           - For advantage collections (with parent_identifier_set): Fetches metadata lazily,
-             skipping books that are already in the parent collection
+        * Availability (circulation) data is always fetched and the hash is compared.
+        * Metadata is fetched only when the identifier was **not** already updated in
+          phase 1 (i.e. not in ``self._title_update_identifiers``) and not already
+          present via the parent collection.
+        * When an unchanged circulation record is encountered (and ``import_all`` is
+          ``False``) iteration stops immediately.
 
-        2. **Out-of-Scope Optimization**:
-           - If all books in the current page were added before modified_since and there were no changes detected,
-             stops pagination early to avoid processing old data
-           - Can be disabled when modified_since is None.
+        The initial-call / subsequent-page semantics are identical to
+        :meth:`import_title_updates`.
 
-        3. **Change Detection**:
-           - Only applies bibliographic updates if metadata has changed
-           - Always checks circulation data as availability changes frequently and applies changes only if changed.
-
-        :param apply_bibliographic: Callback to apply bibliographic metadata updates (title, author, etc.)
-        :param apply_circulation: Callback to apply circulation data updates (copies owned, available, etc.)
-        :param modified_since: Only process books modified after this datetime. If None, processes all books.
-        :param endpoint: OverDrive API endpoint to fetch from. If None, generates a default endpoint
-                         starting from modified_since
-        :param page_size: Number of items to fetch per page
-        :return: FeedImportResult containing current_page (the endpoint that was processed),
-                 next_page (the next endpoint to process, None if done or all books out of scope),
-                 and processed_count (number of books processed in this call)
-
-        .. note::
-           Side Effects:
-           - Creates/updates Identifier records in the database
-           - Adds identifiers to self._identifier_set if provided
-           - Records timing and achievement data in the Timestamp
-           - Logs progress information
+        :param apply_bibliographic: Callback to queue bibliographic apply tasks.
+        :param apply_circulation: Callback to queue circulation apply tasks.
+        :param import_all: Disable hash-based early exit when ``True``.
+        :param modified_since: Lower bound for the ``lastUpdateTime`` filter.
+        :param endpoint: The page to process. ``None`` on the initial call.
+        :param page_size: Items per page (capped by the API limit).
+        :param total_items: Total items in the result set.
+        :return: :class:`FeedImportResult` describing the page processed and the next
+            page to visit (or ``None`` when done).
         """
-        identifiers = []
-        policy = ReplacementPolicy(
-            identifiers=False,
-            subjects=True,
-            contributions=True,
-            formats=True,
-            links=True,
-        )
+        policy = self._default_replacement_policy()
 
         self.log.info(
-            f"Starting process of queuing items in collection {self._collection.name} (id={self._collection.id} "
-            f"for import that have changed since {modified_since}. "
+            f"Starting availability import for collection {self._collection.name} "
+            f"(id={self._collection.id}), modified_since={modified_since}."
         )
 
-        if not endpoint:
-            self.log.info(f"No endpoint provided, generating default endpoint.")
-            endpoint = self._api.book_info_initial_endpoint(
-                start=modified_since, page_size=page_size
+        # Fetch metadata upfront only for main (non-advantage) collections when
+        # we don't already have it from the title-update phase.
+        fetch_metadata = (
+            self._parent_identifiers is None and self._title_update_identifiers is None
+        )
+
+        # --- Initial call: discover total_items and jump to the last page ---
+        if endpoint is None and total_items is None:
+            base_endpoint = self._api.book_info_initial_endpoint(
+                start=modified_since,
+                page_size=page_size,
+                sort_by="lastUpdateTime",
             )
-            self.log.info(f"Generated endpoint: {endpoint}")
-        else:
-            self.log.info(f"Using provided endpoint: {endpoint}")
+            book_data, _, discovered_total = asyncio.run(
+                self._api.fetch_book_info_list(
+                    base_endpoint,
+                    fetch_metadata=fetch_metadata,
+                    fetch_availability=True,
+                )
+            )
+            if discovered_total <= page_size:
+                return self._process_availability_page(
+                    books=list(reversed(book_data)),
+                    fetch_metadata=fetch_metadata,
+                    current_endpoint=base_endpoint,
+                    page_size=page_size,
+                    total_items=discovered_total,
+                    import_all=import_all,
+                    policy=policy,
+                    apply_bibliographic=apply_bibliographic,
+                    apply_circulation=apply_circulation,
+                )
+            last_offset = ((discovered_total - 1) // page_size) * page_size
+            last_page_endpoint = self._api.book_info_endpoint_at_offset(
+                base_endpoint, last_offset
+            )
             self.log.info(
-                f"Ignoring modified_since parameter (value='{modified_since}') since the endpoint "
-                f"was provided."
+                f"Availability import: {discovered_total} total items, "
+                f"jumping to last page offset={last_offset}."
+            )
+            return FeedImportResult(
+                current_page=base_endpoint,
+                next_page=last_page_endpoint,
+                processed_count=0,
+                total_items=discovered_total,
             )
 
-        timestamp = self.get_timestamp()
-        changed_books_count = 0
-        # Fetch metadata upfront if no parent identifier set is provided.  Practically speaking,
-        # if there is no parent identifier set, then the collection being imported is a
-        # main rather than an advantage collection.  We always fetch availability because we do not gain
-        # much by trying to fetch it lazily.
-        fetch_metadata = self._parent_identifiers is None
-        book_data, next_endpoint = asyncio.run(
+        # --- Subsequent pages ---
+        assert endpoint is not None
+        book_data, _, _ = asyncio.run(
             self._api.fetch_book_info_list(
                 endpoint,
                 fetch_metadata=fetch_metadata,
                 fetch_availability=True,
             )
         )
-        for book in book_data:
+        return self._process_availability_page(
+            books=list(reversed(book_data)),
+            fetch_metadata=fetch_metadata,
+            current_endpoint=endpoint,
+            page_size=page_size,
+            total_items=total_items,
+            import_all=import_all,
+            policy=policy,
+            apply_bibliographic=apply_bibliographic,
+            apply_circulation=apply_circulation,
+        )
+
+    def _process_availability_page(
+        self,
+        *,
+        books: list[dict[str, Any]],
+        fetch_metadata: bool,
+        current_endpoint: BookInfoEndpoint,
+        page_size: int,
+        total_items: int | None,
+        import_all: bool,
+        policy: ReplacementPolicy,
+        apply_bibliographic: ApplyBibliographicCallable,
+        apply_circulation: ApplyCirculationCallable,
+    ) -> FeedImportResult:
+        """Process a single page of books for the availability phase.
+
+        Books must already be in reverse chronological order (most recently
+        changed first).  Stops early when the first book with an unchanged
+        circulation hash is encountered (unless ``import_all`` is ``True``).
+        """
+        identifiers: list[Identifier] = []
+        timestamp = self.get_timestamp()
+
+        for book in books:
             identifier, changed = self._process_book(
                 book, fetch_metadata, policy, apply_bibliographic, apply_circulation
             )
-            if changed:
-                changed_books_count += 1
             identifiers.append(identifier)
+
+            if not changed and not import_all:
+                self.log.info(
+                    f"Availability import: book {identifier} circulation unchanged — stopping."
+                )
+                if self._identifier_set is not None:
+                    self._identifier_set.add(*identifiers)
+                return FeedImportResult(
+                    current_page=current_endpoint,
+                    next_page=None,
+                    processed_count=len(identifiers),
+                    total_items=total_items,
+                )
 
         achievements = [f"Total items queued for import: {len(identifiers)}."]
         if (elapsed_time := timestamp.elapsed_seconds) is not None:
@@ -318,21 +573,16 @@ class OverdriveImporter(LoggerMixin):
 
         timestamp.achievements = "\n".join(achievements)
 
-        self.log.info(
-            f"Finished import of {len(identifiers)} for collection {self._collection.name} (id={self._collection.id}). "
-            f"{' '.join(achievements)}"
+        prev_endpoint = self._api.book_info_prev_page_endpoint(
+            current_endpoint, page_size
         )
-        # if we are not in import all mode and all books are both out of scope and no books were changed, we can assume that
-        # were are done importing and therefore we don't need to fetch the next page.
-        if (
-            modified_since is not None
-            and changed_books_count == 0
-            and self._all_books_out_of_scope(modified_since, book_data)
-        ):
-            next_endpoint = None
-
+        self.log.info(
+            f"Availability import: processed {len(identifiers)} books on page "
+            f"{current_endpoint.url}. Next page: {prev_endpoint}."
+        )
         return FeedImportResult(
-            next_page=next_endpoint,
-            current_page=endpoint,
+            current_page=current_endpoint,
+            next_page=prev_endpoint,
             processed_count=len(identifiers),
+            total_items=total_items,
         )

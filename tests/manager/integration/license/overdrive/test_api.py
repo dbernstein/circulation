@@ -2825,7 +2825,7 @@ class TestSyncBookshelf:
 
         initial_endpoint = api.book_info_initial_endpoint(start=None, page_size=1)
 
-        book_info_list, next_endpoint = await api.fetch_book_info_list(
+        book_info_list, next_endpoint, total_items = await api.fetch_book_info_list(
             initial_endpoint, fetch_metadata=True, fetch_availability=True
         )
         assert next_endpoint
@@ -2896,7 +2896,7 @@ class TestSyncBookshelf:
             mock_async_client.queue_response(404, content="Not Found")
 
         initial_endpoint = api.book_info_initial_endpoint(start=None, page_size=1)
-        data, next_endpoint = await api.fetch_book_info_list(
+        data, next_endpoint, total_items = await api.fetch_book_info_list(
             initial_endpoint, fetch_metadata=True, fetch_availability=True
         )
 

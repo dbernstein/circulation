@@ -69,12 +69,15 @@ class OverdriveImportFixture:
 
     @staticmethod
     def create_mock_importer(
-        next_page: BookInfoEndpoint | None = None, processed_count: int = 5
+        next_page: BookInfoEndpoint | None = None,
+        processed_count: int = 5,
+        total_items: int | None = None,
     ) -> tuple[Mock, Mock]:
-        """Create a mock importer with standard setup.
+        """Create a mock importer configured for import_collection (phase 2).
 
         :param next_page: Next page endpoint (None means last page)
         :param processed_count: Number of items processed
+        :param total_items: Total items in result set
         :return: Tuple of (mock_importer, mock_timestamp)
         """
         mock_importer = Mock(spec=OverdriveImporter)
@@ -87,8 +90,37 @@ class OverdriveImportFixture:
             current_page=BookInfoEndpoint(url="http://test.com/books"),
             next_page=next_page,
             processed_count=processed_count,
+            total_items=total_items,
         )
         mock_importer.import_collection.return_value = mock_result
+        return mock_importer, mock_timestamp
+
+    @staticmethod
+    def create_mock_title_updates_importer(
+        next_page: BookInfoEndpoint | None = None,
+        processed_count: int = 5,
+        total_items: int | None = None,
+    ) -> tuple[Mock, Mock]:
+        """Create a mock importer configured for import_title_updates (phase 1).
+
+        :param next_page: Next page endpoint (None means last page)
+        :param processed_count: Number of items processed
+        :param total_items: Total items in result set
+        :return: Tuple of (mock_importer, mock_timestamp)
+        """
+        mock_importer = Mock(spec=OverdriveImporter)
+        mock_timestamp = Mock(spec=Timestamp)
+        mock_timestamp.start = None
+        mock_timestamp.elapsed = "10 seconds"
+        mock_importer.get_timestamp.return_value = mock_timestamp
+
+        mock_result = FeedImportResult(
+            current_page=BookInfoEndpoint(url="http://test.com/books"),
+            next_page=next_page,
+            processed_count=processed_count,
+            total_items=total_items,
+        )
+        mock_importer.import_title_updates.return_value = mock_result
         return mock_importer, mock_timestamp
 
 
@@ -105,6 +137,381 @@ def overdrive_import_fixture(
         overdrive_api_fixture,
         apply_task_fixture,
     )
+
+
+class TestImportTitleUpdates:
+    """Tests for the import_title_updates Celery task."""
+
+    @patch("palace.manager.celery.tasks.overdrive.OverdriveImporter")
+    def test_import_title_updates_basic(
+        self,
+        mock_importer_class: MagicMock,
+        overdrive_import_fixture: OverdriveImportFixture,
+    ):
+        """Test basic import_title_updates task execution."""
+        collection = overdrive_import_fixture.collection
+
+        mock_importer, _ = OverdriveImportFixture.create_mock_title_updates_importer()
+        mock_importer_class.return_value = mock_importer
+
+        result = overdrive.import_title_updates.delay(collection.id).wait()
+
+        mock_importer_class.assert_called_once()
+        call_kwargs = mock_importer_class.call_args.kwargs
+        assert call_kwargs["collection"].id == collection.id
+        assert call_kwargs["identifier_set"] is not None
+        assert call_kwargs.get("parent_identifier_set") is None
+
+        mock_importer.import_title_updates.assert_called_once()
+
+        assert result is not None
+
+    @patch("palace.manager.celery.tasks.overdrive.OverdriveImporter")
+    def test_import_title_updates_with_import_all(
+        self,
+        mock_importer_class: MagicMock,
+        overdrive_import_fixture: OverdriveImportFixture,
+    ):
+        """Test import_title_updates with import_all=True passes it to the importer."""
+        collection = overdrive_import_fixture.collection
+
+        mock_importer, _ = OverdriveImportFixture.create_mock_title_updates_importer()
+        mock_importer_class.return_value = mock_importer
+
+        overdrive.import_title_updates.delay(collection.id, import_all=True).wait()
+
+        call_kwargs = mock_importer.import_title_updates.call_args.kwargs
+        assert call_kwargs["import_all"] is True
+
+    @patch("palace.manager.celery.tasks.overdrive.OverdriveImporter")
+    def test_import_title_updates_with_next_page(
+        self,
+        mock_importer_class: MagicMock,
+        overdrive_import_fixture: OverdriveImportFixture,
+    ):
+        """Test import_title_updates replaces itself when there is a next page."""
+        collection = overdrive_import_fixture.collection
+
+        next_endpoint = BookInfoEndpoint(url="http://test.com/books/page2")
+        mock_importer, _ = OverdriveImportFixture.create_mock_title_updates_importer(
+            next_page=next_endpoint
+        )
+        mock_importer_class.return_value = mock_importer
+
+        with patch.object(overdrive.import_title_updates, "replace") as mock_replace:
+            mock_replace.side_effect = Exception("Task replaced")
+
+            with pytest.raises(Exception, match="Task replaced"):
+                overdrive.import_title_updates.delay(collection.id).wait()
+
+            mock_replace.assert_called_once()
+
+    @patch("palace.manager.celery.tasks.overdrive.OverdriveImporter")
+    def test_import_title_updates_forwards_total_items(
+        self,
+        mock_importer_class: MagicMock,
+        overdrive_import_fixture: OverdriveImportFixture,
+    ):
+        """Test import_title_updates forwards total_items in task.replace() calls."""
+        collection = overdrive_import_fixture.collection
+
+        next_endpoint = BookInfoEndpoint(url="http://test.com/books/page2")
+        mock_importer, _ = OverdriveImportFixture.create_mock_title_updates_importer(
+            next_page=next_endpoint,
+            total_items=500,
+        )
+        mock_importer_class.return_value = mock_importer
+
+        with patch.object(overdrive.import_title_updates, "replace") as mock_replace:
+            mock_replace.side_effect = Exception("Task replaced")
+
+            with pytest.raises(Exception, match="Task replaced"):
+                overdrive.import_title_updates.delay(collection.id).wait()
+
+            replace_sig = mock_replace.call_args[0][0]
+            assert replace_sig.kwargs["total_items"] == 500
+
+    @patch("palace.manager.celery.tasks.overdrive.OverdriveImporter")
+    def test_import_title_updates_with_page_url(
+        self,
+        mock_importer_class: MagicMock,
+        overdrive_import_fixture: OverdriveImportFixture,
+    ):
+        """Test import_title_updates passes the endpoint to the importer."""
+        collection = overdrive_import_fixture.collection
+        page_url = "http://test.com/books/last-page"
+
+        mock_importer, _ = OverdriveImportFixture.create_mock_title_updates_importer()
+        mock_importer_class.return_value = mock_importer
+
+        overdrive.import_title_updates.delay(collection.id, page=page_url).wait()
+
+        call_kwargs = mock_importer.import_title_updates.call_args.kwargs
+        assert call_kwargs["endpoint"] == BookInfoEndpoint(url=page_url)
+
+    @patch("palace.manager.celery.tasks.overdrive.OverdriveImporter")
+    def test_import_title_updates_marked_for_deletion(
+        self,
+        mock_importer_class: MagicMock,
+        overdrive_import_fixture: OverdriveImportFixture,
+        caplog: pytest.LogCaptureFixture,
+    ):
+        """Test import_title_updates skips when collection is marked for deletion."""
+        collection = overdrive_import_fixture.collection
+        collection.marked_for_deletion = True
+
+        caplog.set_level(LogLevel.warning)
+
+        result = overdrive.import_title_updates.delay(collection.id).wait()
+
+        assert "marked for deletion" in caplog.text
+        mock_importer_class.assert_not_called()
+        # Returns an identifier set (empty) rather than skipping
+        assert result is not None
+
+    @patch("palace.manager.celery.tasks.overdrive.OverdriveImporter")
+    def test_workflow_lock_blocks_title_updates(
+        self,
+        mock_importer_class: MagicMock,
+        overdrive_import_fixture: OverdriveImportFixture,
+        redis_fixture: RedisFixture,
+    ):
+        """When workflow lock is held, import_title_updates skips."""
+        collection = overdrive_import_fixture.collection
+        lock_value = str(uuid4())
+        workflow_lock = import_workflow_lock(
+            redis_fixture.client, collection.id, lock_value
+        )
+        workflow_lock.acquire()
+
+        result = overdrive.import_title_updates.delay(collection.id).wait()
+
+        mock_importer_class.assert_not_called()
+        assert result == overdrive._import_skipped_payload()
+        workflow_lock.release()
+
+    @patch("palace.manager.celery.tasks.overdrive.OverdriveImporter")
+    def test_workflow_lock_released_after_title_updates(
+        self,
+        mock_importer_class: MagicMock,
+        overdrive_import_fixture: OverdriveImportFixture,
+        redis_fixture: RedisFixture,
+    ):
+        """After title-updates phase completes, the workflow lock is released."""
+        collection = overdrive_import_fixture.collection
+
+        mock_importer, _ = OverdriveImportFixture.create_mock_title_updates_importer()
+        mock_importer_class.return_value = mock_importer
+
+        overdrive.import_title_updates.delay(collection.id).wait()
+
+        workflow_lock = import_workflow_lock(
+            redis_fixture.client, collection.id, random_value="any"
+        )
+        assert not workflow_lock.locked()
+
+    @patch("palace.manager.celery.tasks.overdrive.OverdriveImporter")
+    def test_workflow_lock_passed_to_title_updates_next_page(
+        self,
+        mock_importer_class: MagicMock,
+        overdrive_import_fixture: OverdriveImportFixture,
+    ):
+        """When replacing task with next page, lock_value is forwarded."""
+        collection = overdrive_import_fixture.collection
+
+        next_endpoint = BookInfoEndpoint(url="http://test.com/books/page2")
+        mock_importer, _ = OverdriveImportFixture.create_mock_title_updates_importer(
+            next_page=next_endpoint
+        )
+        mock_importer_class.return_value = mock_importer
+
+        with patch.object(overdrive.import_title_updates, "replace") as mock_replace:
+            mock_replace.side_effect = Exception("Task replaced")
+
+            with pytest.raises(Exception, match="Task replaced"):
+                overdrive.import_title_updates.delay(collection.id).wait()
+
+            replace_sig = mock_replace.call_args[0][0]
+            assert replace_sig.kwargs["lock_value"] is not None
+            assert isinstance(replace_sig.kwargs["lock_value"], str)
+
+    @patch("palace.manager.celery.tasks.overdrive.OverdriveImporter")
+    def test_workflow_lock_not_released_on_autoretry(
+        self,
+        mock_importer_class: MagicMock,
+        overdrive_import_fixture: OverdriveImportFixture,
+        redis_fixture: RedisFixture,
+        celery_fixture: CeleryFixture,
+    ):
+        """When an autoretry exception is raised, the workflow lock is not released."""
+        from palace.manager.util.http.exception import BadResponseException
+
+        collection = overdrive_import_fixture.collection
+        mock_importer, _ = OverdriveImportFixture.create_mock_title_updates_importer()
+        mock_response = MockRequestsResponse(500, content="Internal Server Error")
+        mock_importer.import_title_updates.side_effect = BadResponseException(
+            "http://test.com", "Bad response", mock_response
+        )
+        mock_importer_class.return_value = mock_importer
+
+        with celery_fixture.patch_retry_backoff():
+            result = overdrive.import_title_updates.delay(collection.id).wait()
+
+        assert result == overdrive._import_skipped_payload()
+        workflow_lock = import_workflow_lock(
+            redis_fixture.client, collection.id, random_value="any"
+        )
+        assert workflow_lock.locked()
+
+
+class TestImportAvailabilityBridge:
+    """Tests for the import_availability_bridge Celery task."""
+
+    def test_bridge_propagates_skip_payload(
+        self,
+        overdrive_import_fixture: OverdriveImportFixture,
+    ):
+        """When phase 1 was skipped, bridge returns the skip payload."""
+        collection = overdrive_import_fixture.collection
+        skip_payload = overdrive._import_skipped_payload()
+
+        result = overdrive.import_availability_bridge.delay(
+            skip_payload,
+            collection.id,
+            import_all=False,
+        ).wait()
+
+        assert result == overdrive._import_skipped_payload()
+
+    @patch("palace.manager.celery.tasks.overdrive.OverdriveImporter")
+    def test_bridge_launches_availability_import(
+        self,
+        mock_importer_class: MagicMock,
+        overdrive_import_fixture: OverdriveImportFixture,
+        redis_fixture: RedisFixture,
+    ):
+        """Bridge replaces itself with import_collection, passing title_update_identifiers."""
+        collection = overdrive_import_fixture.collection
+
+        # Phase 1 returns an IdentifierSet
+        identifier_set = IdentifierSet(
+            redis_fixture.client, ["title", "update", "test", "key"]
+        )
+        identifier = IdentifierData(
+            identifier="some-id", type=IdentifierType.OVERDRIVE_ID
+        )
+        identifier_set.add(identifier)
+
+        with patch.object(
+            overdrive.import_availability_bridge, "replace"
+        ) as mock_replace:
+            mock_replace.side_effect = Exception("Task replaced")
+
+            with pytest.raises(Exception, match="Task replaced"):
+                overdrive.import_availability_bridge.delay(
+                    identifier_set,
+                    collection.id,
+                    import_all=False,
+                ).wait()
+
+            mock_replace.assert_called_once()
+            replace_sig = mock_replace.call_args[0][0]
+            # Verify it launches import_collection
+            assert (
+                replace_sig.task
+                == "palace.manager.celery.tasks.overdrive.import_collection"
+            )
+            replace_kwargs = replace_sig.kwargs
+            assert replace_kwargs["collection_id"] == collection.id
+            assert replace_kwargs["title_update_identifiers"] is not None
+            assert isinstance(replace_kwargs["title_update_identifiers"], dict)
+            assert replace_kwargs["title_update_identifiers"]["key"] == [
+                "title",
+                "update",
+                "test",
+                "key",
+            ]
+
+    @patch("palace.manager.celery.tasks.overdrive.OverdriveImporter")
+    def test_bridge_handles_dict_input(
+        self,
+        mock_importer_class: MagicMock,
+        overdrive_import_fixture: OverdriveImportFixture,
+        redis_fixture: RedisFixture,
+    ):
+        """Bridge handles phase 1 result that is already a serialised dict."""
+        collection = overdrive_import_fixture.collection
+
+        # Simulate Celery serialization: IdentifierSet becomes dict
+        serialized = {"key": ["title", "update", "dict", "key"], "expire_time": 43200}
+
+        with patch.object(
+            overdrive.import_availability_bridge, "replace"
+        ) as mock_replace:
+            mock_replace.side_effect = Exception("Task replaced")
+
+            with pytest.raises(Exception, match="Task replaced"):
+                overdrive.import_availability_bridge.delay(
+                    serialized,
+                    collection.id,
+                    import_all=False,
+                ).wait()
+
+            replace_kwargs = mock_replace.call_args[0][0].kwargs
+            assert replace_kwargs["title_update_identifiers"] == serialized
+
+    def test_bridge_handles_none_input(
+        self,
+        overdrive_import_fixture: OverdriveImportFixture,
+    ):
+        """Bridge with None phase-1 result still replaces with import_collection."""
+        collection = overdrive_import_fixture.collection
+
+        with patch.object(
+            overdrive.import_availability_bridge, "replace"
+        ) as mock_replace:
+            mock_replace.side_effect = Exception("Task replaced")
+
+            with pytest.raises(Exception, match="Task replaced"):
+                overdrive.import_availability_bridge.delay(
+                    None,
+                    collection.id,
+                    import_all=False,
+                ).wait()
+
+            replace_kwargs = mock_replace.call_args[0][0].kwargs
+            assert replace_kwargs["title_update_identifiers"] is None
+
+    @patch("palace.manager.celery.tasks.overdrive.OverdriveImporter")
+    def test_bridge_forwards_import_all_and_dates(
+        self,
+        mock_importer_class: MagicMock,
+        overdrive_import_fixture: OverdriveImportFixture,
+        redis_fixture: RedisFixture,
+    ):
+        """Bridge forwards import_all, modified_since, and start_time to import_collection."""
+        collection = overdrive_import_fixture.collection
+        modified_since = datetime_utc(2023, 1, 1)
+        start_time = datetime_utc(2023, 6, 1)
+
+        with patch.object(
+            overdrive.import_availability_bridge, "replace"
+        ) as mock_replace:
+            mock_replace.side_effect = Exception("Task replaced")
+
+            with pytest.raises(Exception, match="Task replaced"):
+                overdrive.import_availability_bridge.delay(
+                    None,
+                    collection.id,
+                    import_all=True,
+                    modified_since=modified_since,
+                    start_time=start_time,
+                ).wait()
+
+            replace_kwargs = mock_replace.call_args[0][0].kwargs
+            assert replace_kwargs["import_all"] is True
+            assert replace_kwargs["modified_since"] == modified_since
+            assert replace_kwargs["start_time"] == start_time
 
 
 class TestImportCollection:
@@ -160,11 +567,7 @@ class TestImportCollection:
         # Run the task with import_all=True
         overdrive.import_collection.delay(collection.id, import_all=True).wait()
 
-        # Verify importer was created WITHOUT import_all parameter (removed)
-        call_kwargs = mock_importer_class.call_args.kwargs
-        assert "import_all" not in call_kwargs
-
-        # Verify modified_since is None when import_all is True (bypasses out-of-scope check)
+        # Verify modified_since is None when import_all is True
         import_call = mock_importer.import_collection.call_args
         assert import_call.kwargs["modified_since"] is None
 
@@ -193,6 +596,89 @@ class TestImportCollection:
 
             # Verify replace was called with next page URL
             mock_replace.assert_called_once()
+
+    @patch("palace.manager.celery.tasks.overdrive.OverdriveImporter")
+    def test_import_collection_forwards_total_items_on_replace(
+        self,
+        mock_importer_class: MagicMock,
+        overdrive_import_fixture: OverdriveImportFixture,
+    ):
+        """Test import_collection forwards total_items when replacing for next page."""
+        collection = overdrive_import_fixture.collection
+
+        next_endpoint = BookInfoEndpoint(url="http://test.com/books/page2")
+        mock_importer, _ = overdrive_import_fixture.create_mock_importer(
+            next_page=next_endpoint,
+            total_items=300,
+        )
+        mock_importer_class.return_value = mock_importer
+
+        with patch.object(overdrive.import_collection, "replace") as mock_replace:
+            mock_replace.side_effect = Exception("Task replaced")
+
+            with pytest.raises(Exception, match="Task replaced"):
+                overdrive.import_collection.delay(collection.id).wait()
+
+            replace_sig = mock_replace.call_args[0][0]
+            assert replace_sig.kwargs["total_items"] == 300
+
+    @patch("palace.manager.celery.tasks.overdrive.OverdriveImporter")
+    def test_import_collection_with_title_update_identifiers(
+        self,
+        mock_importer_class: MagicMock,
+        overdrive_import_fixture: OverdriveImportFixture,
+        redis_fixture: RedisFixture,
+    ):
+        """Test that import_collection rehydrates and passes title_update_identifiers."""
+        collection = overdrive_import_fixture.collection
+
+        # Create a phase-1 identifier set
+        title_set = IdentifierSet(redis_fixture.client, ["title", "update", "key"])
+        identifier = IdentifierData(
+            identifier="phase1-id", type=IdentifierType.OVERDRIVE_ID
+        )
+        title_set.add(identifier)
+        title_set_dict = title_set.__json__()
+
+        mock_importer, _ = overdrive_import_fixture.create_mock_importer()
+        mock_importer_class.return_value = mock_importer
+
+        overdrive.import_collection.delay(
+            collection.id, title_update_identifiers=title_set_dict
+        ).wait()
+
+        call_kwargs = mock_importer_class.call_args.kwargs
+        assert call_kwargs["title_update_identifier_set"] is not None
+        assert isinstance(call_kwargs["title_update_identifier_set"], IdentifierSet)
+
+    @patch("palace.manager.celery.tasks.overdrive.OverdriveImporter")
+    def test_import_collection_title_update_identifiers_forwarded_on_replace(
+        self,
+        mock_importer_class: MagicMock,
+        overdrive_import_fixture: OverdriveImportFixture,
+        redis_fixture: RedisFixture,
+    ):
+        """Test title_update_identifiers is forwarded when replacing for next page."""
+        collection = overdrive_import_fixture.collection
+
+        title_set_dict = {"key": ["title", "key"], "expire_time": 43200}
+        next_endpoint = BookInfoEndpoint(url="http://test.com/books/page2")
+        mock_importer, _ = overdrive_import_fixture.create_mock_importer(
+            next_page=next_endpoint
+        )
+        mock_importer_class.return_value = mock_importer
+
+        with patch.object(overdrive.import_collection, "replace") as mock_replace:
+            mock_replace.side_effect = Exception("Task replaced")
+
+            with pytest.raises(Exception, match="Task replaced"):
+                overdrive.import_collection.delay(
+                    collection.id,
+                    title_update_identifiers=title_set_dict,
+                ).wait()
+
+            replace_sig = mock_replace.call_args[0][0]
+            assert replace_sig.kwargs["title_update_identifiers"] is not None
 
     @patch("palace.manager.celery.tasks.overdrive.OverdriveImporter")
     def test_import_collection_with_next_page_and_parent_identifiers(
@@ -601,19 +1087,24 @@ class TestImportCollectionGroup:
 
     @staticmethod
     def setup_chain_mocks(
-        mock_import_collection: MagicMock,
+        mock_import_title_updates: MagicMock,
+        mock_bridge: MagicMock,
         mock_router: MagicMock,
         mock_chain: MagicMock,
     ) -> Mock:
         """Set up mock chain and task signatures for testing.
 
-        :param mock_import_collection: Mock for import_collection task
+        :param mock_import_title_updates: Mock for import_title_updates task
+        :param mock_bridge: Mock for import_availability_bridge task
         :param mock_router: Mock for import_result_router task
         :param mock_chain: Mock for chain function
-        :return: Mock chain result
+        :return: Mock chain result callable
         """
-        mock_import_sig = Mock()
-        mock_import_collection.s.return_value = mock_import_sig
+        mock_title_sig = Mock()
+        mock_import_title_updates.s.return_value = mock_title_sig
+
+        mock_bridge_sig = Mock()
+        mock_bridge.s.return_value = mock_bridge_sig
 
         mock_router_sig = Mock()
         mock_router.s.return_value = mock_router_sig
@@ -629,33 +1120,40 @@ class TestImportCollectionGroup:
         return mock_chain_result
 
     @patch("palace.manager.celery.tasks.overdrive.chain")
-    @patch("palace.manager.celery.tasks.overdrive.import_collection")
+    @patch("palace.manager.celery.tasks.overdrive.import_availability_bridge")
+    @patch("palace.manager.celery.tasks.overdrive.import_title_updates")
     @patch("palace.manager.celery.tasks.overdrive.import_result_router")
     def test_import_collection_group_basic(
         self,
         mock_router: MagicMock,
-        mock_import_collection: MagicMock,
+        mock_import_title_updates: MagicMock,
+        mock_bridge: MagicMock,
         mock_chain: MagicMock,
         overdrive_import_fixture: OverdriveImportFixture,
     ):
-        """Test import_collection_group chains parent import and router."""
+        """Test import_collection_group chains title updates, bridge, and router."""
         collection = overdrive_import_fixture.collection
 
         # Set up chain mocks
         mock_chain_result = self.setup_chain_mocks(
-            mock_import_collection, mock_router, mock_chain
+            mock_import_title_updates, mock_bridge, mock_router, mock_chain
         )
 
         # Run the task
         overdrive.import_collection_group.delay(collection.id).wait()
 
-        # Verify import_collection task signature was created
-        mock_import_collection.s.assert_called_once_with(
+        # Verify import_title_updates signature was created
+        mock_import_title_updates.s.assert_called_once_with(
             collection_id=collection.id,
             import_all=False,
-            page=None,
-            parent_identifiers=None,
-            return_identifiers=True,
+            modified_since=None,
+            start_time=None,
+        )
+
+        # Verify import_availability_bridge signature was created
+        mock_bridge.s.assert_called_once_with(
+            collection_id=collection.id,
+            import_all=False,
             modified_since=None,
             start_time=None,
         )
@@ -672,12 +1170,14 @@ class TestImportCollectionGroup:
         mock_chain_result.assert_called_once()
 
     @patch("palace.manager.celery.tasks.overdrive.chain")
-    @patch("palace.manager.celery.tasks.overdrive.import_collection")
+    @patch("palace.manager.celery.tasks.overdrive.import_availability_bridge")
+    @patch("palace.manager.celery.tasks.overdrive.import_title_updates")
     @patch("palace.manager.celery.tasks.overdrive.import_result_router")
     def test_import_collection_group_with_import_all(
         self,
         mock_router: MagicMock,
-        mock_import_collection: MagicMock,
+        mock_import_title_updates: MagicMock,
+        mock_bridge: MagicMock,
         mock_chain: MagicMock,
         overdrive_import_fixture: OverdriveImportFixture,
     ):
@@ -685,22 +1185,30 @@ class TestImportCollectionGroup:
         collection = overdrive_import_fixture.collection
 
         # Set up chain mocks
-        self.setup_chain_mocks(mock_import_collection, mock_router, mock_chain)
+        self.setup_chain_mocks(
+            mock_import_title_updates, mock_bridge, mock_router, mock_chain
+        )
 
         # Run the task with import_all=True
         overdrive.import_collection_group.delay(collection.id, import_all=True).wait()
 
-        # Verify import_all was passed through
-        call_args = mock_import_collection.s.call_args.kwargs
-        assert call_args["import_all"] is True
+        # Verify import_all was passed to title_updates
+        title_args = mock_import_title_updates.s.call_args.kwargs
+        assert title_args["import_all"] is True
+
+        # Verify import_all was passed to bridge
+        bridge_args = mock_bridge.s.call_args.kwargs
+        assert bridge_args["import_all"] is True
 
     @patch("palace.manager.celery.tasks.overdrive.chain")
-    @patch("palace.manager.celery.tasks.overdrive.import_collection")
+    @patch("palace.manager.celery.tasks.overdrive.import_availability_bridge")
+    @patch("palace.manager.celery.tasks.overdrive.import_title_updates")
     @patch("palace.manager.celery.tasks.overdrive.import_result_router")
     def test_import_collection_group_with_custom_dates(
         self,
         mock_router: MagicMock,
-        mock_import_collection: MagicMock,
+        mock_import_title_updates: MagicMock,
+        mock_bridge: MagicMock,
         mock_chain: MagicMock,
         overdrive_import_fixture: OverdriveImportFixture,
     ):
@@ -710,25 +1218,34 @@ class TestImportCollectionGroup:
         start_time = datetime_utc(2023, 6, 1)
 
         # Set up chain mocks
-        self.setup_chain_mocks(mock_import_collection, mock_router, mock_chain)
+        self.setup_chain_mocks(
+            mock_import_title_updates, mock_bridge, mock_router, mock_chain
+        )
 
         # Run the task with custom dates
         overdrive.import_collection_group.delay(
             collection.id, modified_since=modified_since, start_time=start_time
         ).wait()
 
-        # Verify dates were passed through
-        call_args = mock_import_collection.s.call_args.kwargs
-        assert call_args["modified_since"] == modified_since
-        assert call_args["start_time"] == start_time
+        # Verify dates were passed to title_updates
+        title_args = mock_import_title_updates.s.call_args.kwargs
+        assert title_args["modified_since"] == modified_since
+        assert title_args["start_time"] == start_time
+
+        # Verify dates were passed to bridge
+        bridge_args = mock_bridge.s.call_args.kwargs
+        assert bridge_args["modified_since"] == modified_since
+        assert bridge_args["start_time"] == start_time
 
     @patch("palace.manager.celery.tasks.overdrive.chain")
-    @patch("palace.manager.celery.tasks.overdrive.import_collection")
+    @patch("palace.manager.celery.tasks.overdrive.import_availability_bridge")
+    @patch("palace.manager.celery.tasks.overdrive.import_title_updates")
     @patch("palace.manager.celery.tasks.overdrive.import_result_router")
     def test_import_collection_group_skips_when_lock_held(
         self,
         mock_router: MagicMock,
-        mock_import_collection: MagicMock,
+        mock_import_title_updates: MagicMock,
+        mock_bridge: MagicMock,
         mock_chain: MagicMock,
         overdrive_import_fixture: OverdriveImportFixture,
         redis_fixture: RedisFixture,
@@ -1169,7 +1686,12 @@ class TestIntegration:
         redis_fixture: RedisFixture,
         apply_task_fixture: ApplyTaskFixture,
     ):
-        """Test import with parent identifiers provided and Overdrive data."""
+        """Test two-phase import flow end-to-end with live Overdrive fixture data.
+
+        Phase 1 (import_title_updates): fetches book list + metadata.
+        Phase 2 (import_collection): fetches book list + availability.
+        Both phases use a single-page result (totalItems missing → 0).
+        """
         collection = overdrive_api_fixture.collection
         availability_data, availability_json = overdrive_api_fixture.sample_json(
             "overdrive_availability_information.json"
@@ -1184,23 +1706,19 @@ class TestIntegration:
 
         book = overdrive_book_list_with_next_link_json["products"][0]
 
-        (
-            overdrive_book_list_last_page_no_products_data,
-            overdrive_book_list_last_page_no_products_json,
-        ) = overdrive_api_fixture.sample_json(
-            "overdrive_book_list_last_page_no_products.json"
-        )
         mock_async_client = overdrive_api_fixture.mock_async_client
+
+        # Phase 1 (import_title_updates): book list + metadata
         mock_async_client.queue_response(
             200, content=overdrive_book_list_with_next_link_data
         )
-
         mock_async_client.queue_response(200, content=metadata_data)
-        mock_async_client.queue_response(200, content=availability_data)
 
+        # Phase 2 (import_collection): book list + availability
         mock_async_client.queue_response(
-            200, content=overdrive_book_list_last_page_no_products_data
+            200, content=overdrive_book_list_with_next_link_data
         )
+        mock_async_client.queue_response(200, content=availability_data)
 
         # sanity check that the identifier does not exist
         assert not self._get_identifier(book, overdrive_api_fixture)

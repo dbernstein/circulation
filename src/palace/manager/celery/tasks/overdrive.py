@@ -53,48 +53,221 @@ class ImportRouterResult(TypedDict, total=False):
     throws=(RemoteIntegrationException,),
     retry_backoff=60,
 )
+def import_title_updates(
+    task: Task,
+    collection_id: int,
+    *,
+    import_all: bool = False,
+    page: str | None = None,
+    total_items: int | None = None,
+    modified_since: datetime.datetime | None = None,
+    start_time: datetime.datetime | None = None,
+    lock_value: str | None = None,
+) -> IdentifierSet | ImportSkippedPayload | None:
+    """Phase 1 import: process title-metadata changes in reverse chronological order.
+
+    Iterates the product list sorted by ``lastTitleUpdateTime`` starting from the last
+    page (most recently changed) and works backwards.  Stops when a book whose
+    bibliographic hash is unchanged is encountered (unless ``import_all=True``).
+
+    Uses ``task.replace()`` to chain itself for subsequent pages while holding the
+    workflow lock.  Returns an :class:`~palace.manager.service.redis.models.set.IdentifierSet`
+    of all identifiers whose metadata was queued for update so that phase 2 can skip
+    redundant metadata fetches.
+
+    :param collection_id: The ID of the collection to import.
+    :param import_all: When ``True`` every record is processed regardless of whether
+        it has changed.
+    :param page: URL of the page to process.  ``None`` on the initial call.
+    :param total_items: Total items in the result set, forwarded across pages.
+    :param modified_since: Lower bound for the ``lastTitleUpdateTime`` filter.
+    :param start_time: When this import run began; set on the first page.
+    :param lock_value: UUID identifying this import workflow across page boundaries.
+    :return: :class:`IdentifierSet` of updated identifiers, or an
+        :class:`ImportSkippedPayload` when another import is in progress.
+    """
+    redis = task.services.redis().client()
+    registry = task.services.integration_registry().license_providers()
+
+    if start_time is None:
+        start_time = utc_now()
+
+    is_first_page = page is None and lock_value is None
+    if lock_value is None:
+        lock_value = str(uuid4())
+
+    workflow_lock = import_workflow_lock(redis, collection_id, lock_value)
+
+    with workflow_lock.lock(
+        raise_when_not_acquired=False,
+        ignored_exceptions=(Ignore, BadResponseException, RequestTimedOut),
+    ) as workflow_lock_acquired:
+        if not workflow_lock_acquired and is_first_page:
+            task.log.warning(
+                f"OverDrive title-update import skipped for collection {collection_id}: "
+                "another import is already in progress."
+            )
+            return _import_skipped_payload()
+        if not workflow_lock_acquired and not is_first_page:
+            task.log.warning(
+                f"OverDrive title-update import for collection {collection_id}: workflow lock expired "
+                "between pages; continuing (another import may be running)."
+            )
+
+        with task.transaction() as session:
+            collection = load_from_id(session, Collection, collection_id)
+            collection_name = collection.name
+
+            identifier_set = IdentifierSet(
+                redis, import_key(collection.id, task.request.id)
+            )
+
+            if collection.marked_for_deletion:
+                task.log.warning(
+                    f"This collection is marked for deletion. "
+                    f"Skipping title-update import of '{collection_name}'."
+                )
+                return identifier_set
+
+            importer = OverdriveImporter(
+                db=session,
+                collection=collection,
+                registry=registry,
+                identifier_set=identifier_set,
+            )
+
+            task.log.info(
+                f"OverDrive title-update import started: '{collection_name}' "
+                f"modified_since={modified_since}, page={page}"
+            )
+
+            endpoint = None if not page else BookInfoEndpoint(page)
+
+            result = importer.import_title_updates(
+                apply_bibliographic=apply.bibliographic_apply.delay,
+                import_all=import_all,
+                endpoint=endpoint,
+                modified_since=modified_since,
+                total_items=total_items,
+            )
+
+            task.log.info(
+                f"OverDrive title-update import page complete: '{collection_name}' "
+                f"Page: {result.current_page}. Processed: {result.processed_count}."
+            )
+
+        if result.next_page is not None:
+            task.log.info(
+                f"OverDrive title-update import re-queueing: '{collection_name}' "
+                f"Next page: {result.next_page}."
+            )
+            raise task.replace(
+                task.s(
+                    collection_id=collection_id,
+                    import_all=import_all,
+                    page=result.next_page.url,
+                    total_items=result.total_items,
+                    modified_since=modified_since,
+                    start_time=start_time,
+                    lock_value=lock_value,
+                )
+            )
+        else:
+            return identifier_set
+
+
+@shared_task(queue=QueueNames.default, bind=True)
+def import_availability_bridge(
+    task: Task,
+    title_update_result: IdentifierSet | dict[str, Any] | ImportSkippedPayload | None,
+    collection_id: int,
+    *,
+    import_all: bool = False,
+    modified_since: datetime.datetime | None = None,
+    start_time: datetime.datetime | None = None,
+) -> ImportSkippedPayload | None:
+    """Bridge between the title-update phase and the availability phase.
+
+    Receives the phase-1 :class:`IdentifierSet` (or skip payload) from the Celery
+    chain and immediately replaces itself with :func:`import_collection`, preserving
+    the chain's callback to :func:`import_result_router`.
+
+    :param title_update_result: Result from :func:`import_title_updates`.
+    :param collection_id: The collection to import.
+    :param import_all: Forwarded to :func:`import_collection`.
+    :param modified_since: Forwarded to :func:`import_collection`.
+    :param start_time: Forwarded to :func:`import_collection`.
+    """
+    if _is_import_skipped(title_update_result):
+        task.log.info(
+            f"OverDrive availability import skipped for collection {collection_id}: "
+            "title-update phase was skipped."
+        )
+        return _import_skipped_payload()
+
+    title_update_identifiers: dict[str, Any] | None = None
+    if title_update_result is not None:
+        title_update_identifiers = (
+            title_update_result.__json__()
+            if isinstance(title_update_result, IdentifierSet)
+            else title_update_result  # already a serialised dict
+        )
+
+    raise task.replace(
+        import_collection.s(
+            collection_id=collection_id,
+            import_all=import_all,
+            modified_since=modified_since,
+            start_time=start_time,
+            title_update_identifiers=title_update_identifiers,
+        )
+    )
+
+
+@shared_task(
+    queue=QueueNames.default,
+    bind=True,
+    max_retries=4,
+    autoretry_for=(BadResponseException, RequestTimedOut),
+    throws=(RemoteIntegrationException,),
+    retry_backoff=60,
+)
 def import_collection(
     task: Task,
     collection_id: int,
     *,
     import_all: bool = False,
     page: str | None = None,
+    total_items: int | None = None,
     modified_since: datetime.datetime | None = None,
     start_time: datetime.datetime | None = None,
     return_identifiers: bool = True,
     parent_identifiers: dict[str, Any] | None = None,
+    title_update_identifiers: dict[str, Any] | None = None,
     lock_value: str | None = None,
 ) -> IdentifierSet | ImportSkippedPayload | None:
-    """
-    Run an import for a single Overdrive collection.
+    """Phase 2 import: process availability (circulation) changes in reverse chronological order.
 
-    This task processes identifiers from the OverDrive API in a paginated
-    fashion. When multiple pages are present, the task chains itself using task.replace()
-    to process subsequent pages while maintaining the same modified_since timestamp
-    and start_time across all pages.
+    Iterates the product list sorted by ``lastUpdateTime`` starting from the last page
+    and works backwards.  Stops when a book whose circulation hash is unchanged is
+    encountered (unless ``import_all=True``).
 
-    :param collection_id: The ID of the collection to import
-    :param import_all: If True, import all titles regardless of whether they have changed.
-        If False, import titles that have changed since the modified_since date.
-    :param page: The "page" to be processed. The page param is a url represented as a string. A None value means the
-        import will start from the beginning of the set.
-    :param modified_since: Only process titles modified after this datetime. This field parameter is ignored if
-        import_all is True. If import_all is False and modified_since is None, then only titles after the last import
-        timestamp's start time will be imported. If there is no prior timestamp, all titles will be imported.
-         Finally, if import_all is False and modified_since is not None, then
-        only titles modified after modified_since date will be imported.
-    :param start_time: The datetime when this import process began. Used to update
-        the collection's timestamp only after all pages have been processed. If None,
-        will be set to the current time on the first page.
-    :param return_identifiers: A running set of identifiers that have been processed so far in this run.
-    :param parent_identifiers: A running set of parent identifiers (if not a parent collection)
-        that were processed before this run started. This value is a serialized representation of the
-        parent_identifier IdentifierSet.
-    :param lock_value: UUID identifying this import workflow. Passed between pages to hold the workflow lock
-        across page boundaries. Generated on the first page when None.
-    :return: IdentifierSet when import completes and return_identifiers is True; None when
-        return_identifiers is False or collection is marked for deletion; {IMPORT_SKIPPED: True}
-        when the workflow lock is held and another import is already in progress.
+    :param collection_id: The ID of the collection to import.
+    :param import_all: When ``True`` every record is processed regardless of whether
+        it has changed.
+    :param page: URL of the page to process.  ``None`` on the initial call.
+    :param total_items: Total items in the result set, forwarded across pages.
+    :param modified_since: Only process titles modified after this datetime.
+    :param start_time: When this import run began.
+    :param return_identifiers: When ``True`` build and return an
+        :class:`IdentifierSet` of all processed identifiers.
+    :param parent_identifiers: Serialised :class:`IdentifierSet` from the parent
+        collection (Advantage collections only).
+    :param title_update_identifiers: Serialised :class:`IdentifierSet` from phase 1.
+        Identifiers in this set skip the metadata fetch in phase 2.
+    :param lock_value: UUID identifying this import workflow across page boundaries.
+    :return: :class:`IdentifierSet` when ``return_identifiers`` is ``True``;
+        ``None`` otherwise; :class:`ImportSkippedPayload` when skipped.
     """
     redis = task.services.redis().client()
     registry = task.services.integration_registry().license_providers()
@@ -152,12 +325,19 @@ def import_collection(
                 else None
             )
 
+            title_update_identifier_set = (
+                rehydrate_identifier_set(task, title_update_identifiers)
+                if title_update_identifiers
+                else None
+            )
+
             importer = OverdriveImporter(
                 db=session,
                 collection=collection,
                 registry=registry,
                 identifier_set=identifier_set,
                 parent_identifier_set=parent_identifier_set,
+                title_update_identifier_set=title_update_identifier_set,
             )
 
             if modified_since is None:
@@ -177,8 +357,10 @@ def import_collection(
             result = importer.import_collection(
                 apply_bibliographic=apply.bibliographic_apply.delay,
                 apply_circulation=apply.circulation_apply.delay,
+                import_all=import_all,
                 endpoint=endpoint,
                 modified_since=modified_since,
+                total_items=total_items,
             )
 
             task.log.info(
@@ -206,17 +388,24 @@ def import_collection(
             task.log.info(
                 f"OverDrive import re-queueing: '{collection_name}' Next page: {result.next_page}."
             )
-            # Serialize parent_identifier_set to dict for passing to next task
+            # Serialize identifier sets for passing to next task
             serialized_parent_identifiers = (
                 parent_identifier_set.__json__() if parent_identifier_set else None
+            )
+            serialized_title_update_identifiers = (
+                title_update_identifier_set.__json__()
+                if title_update_identifier_set
+                else title_update_identifiers  # already a dict or None
             )
             raise task.replace(
                 task.s(
                     collection_id=collection_id,
                     import_all=import_all,
                     parent_identifiers=serialized_parent_identifiers,
+                    title_update_identifiers=serialized_title_update_identifiers,
                     return_identifiers=return_identifiers,
                     page=result.next_page.url,
+                    total_items=result.total_items,
                     modified_since=modified_since,
                     start_time=start_time,
                     lock_value=lock_value,
@@ -244,32 +433,24 @@ def import_collection_group(
 ) -> dict[str, Any] | ImportSkippedPayload:
     """Import an Overdrive collection and all its child (Advantage) collections.
 
-    This task orchestrates the import of a parent Overdrive collection and chains
-    the import of any associated Overdrive Advantage (child) collections. It uses
-    Celery's chord pattern to run child imports in parallel after the parent completes,
-    and then cleans up the shared identifier set.
+    Orchestrates the two-phase import for the parent collection:
 
-    Workflow:
-        1. Imports the parent collection
-        2. Passes the parent's identifier set to child collections
-        3. Imports all child collections in parallel (if any exist)
-        4. Cleans up the shared identifier set after all imports complete
+    1. **Phase 1** (:func:`import_title_updates`): iterate the product list sorted by
+       ``lastTitleUpdateTime`` in reverse order, updating metadata for changed titles.
+    2. **Phase 2** (:func:`import_collection` via :func:`import_availability_bridge`):
+       iterate by ``lastUpdateTime`` in reverse order, updating circulation data and
+       metadata for any titles not covered in phase 1.
+    3. Child (Advantage) collections are imported in parallel after phase 2 completes,
+       with the parent's identifier set passed to optimise their metadata fetches.
 
-    :param collection_id: The ID of the parent collection to import
-    :param import_all: If True, import all titles regardless of change status.
-                       If False, only import changed titles based on modified_since.
-    :param modified_since: Only process titles modified after this datetime.
-                          See import_collection docstring for detailed behavior.
-    :param start_time: The datetime when this import began. Used to update the
-                      collection's timestamp. If None, uses current time.
-    :return: Dictionary containing the chain_id for tracking the async import chain,
-             or an import-skipped payload if another workflow is already in progress.
+    :param collection_id: The ID of the parent collection to import.
+    :param import_all: When ``True`` import all titles regardless of change status.
+    :param modified_since: Lower bound for the time filters in both phases.
+    :param start_time: When this import began.
+    :return: ``{"chain_id": "..."}`` or an :class:`ImportSkippedPayload`.
     """
     redis = task.services.redis().client()
     # Defense-in-depth: skip chain creation if a workflow is already running.
-    # This prevents redundant chains from being queued when the workflow lock
-    # expires between pages and a new Beat tick fires before import_collection
-    # can re-acquire and enforce the first-page guard itself.
     if import_workflow_lock(redis, collection_id, str(uuid4())).locked():
         task.log.info(
             f"OverDrive import skipped for collection {collection_id}: "
@@ -278,12 +459,15 @@ def import_collection_group(
         return _import_skipped_payload()
 
     result = chain(
-        import_collection.s(
+        import_title_updates.s(
             collection_id=collection_id,
             import_all=import_all,
-            page=None,
-            parent_identifiers=None,
-            return_identifiers=True,
+            modified_since=modified_since,
+            start_time=start_time,
+        ),
+        import_availability_bridge.s(
+            collection_id=collection_id,
+            import_all=import_all,
             modified_since=modified_since,
             start_time=start_time,
         ),
